@@ -1,0 +1,6 @@
+# Keep LF where tools need it byte for byte: the setup scripts run under sh (also Git Bash on
+# Windows), and `git apply` rejects a patch whose line endings changed.
+* text=auto
+*.sh text eol=lf
+*.patch text eol=lf
+Makefile text eol=lf

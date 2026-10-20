@@ -2,10 +2,31 @@
 
 use std::{
 	io::{BufRead, BufReader, Read, Write},
+	path::Path,
 	process::{Child, ChildStdin, ChildStdout, Command, Stdio},
 };
 
 use serde_json::{Value, json};
+
+/// A `file://` URI for a path, spelled the way the server writes them: `/a b` is
+/// `file:///a%20b`, and the Windows path `C:\a` is `file:///C:/a`.
+fn file_uri(path: &Path) -> String {
+	let path = path.to_string_lossy().replace('\\', "/");
+	let drive = path.as_bytes().first().is_some_and(u8::is_ascii_alphabetic)
+		&& path.as_bytes().get(1) == Some(&b':');
+	let mut out = String::from("file://");
+	if !path.starts_with('/') {
+		out.push('/');
+	}
+	for (i, b) in path.bytes().enumerate() {
+		if b.is_ascii_alphanumeric() || b"/-._~".contains(&b) || (drive && i == 1) {
+			out.push(b as char);
+		} else {
+			out.push_str(&format!("%{b:02X}"));
+		}
+	}
+	out
+}
 
 struct Client {
 	child: Child,
@@ -222,7 +243,7 @@ fn imports() {
 		std::fs::create_dir_all(p.parent().unwrap()).unwrap();
 		std::fs::write(p, "{}").unwrap();
 	}
-	let uri_of = |rel: &str| format!("file://{}", ws.join(rel).display());
+	let uri_of = |rel: &str| file_uri(&ws.join(rel));
 
 	let mut c = Client::start();
 	c.send(
@@ -285,7 +306,7 @@ fn field_navigation_and_completion() {
 		"local h = 1;\n{\n  alpha: h,\n  nested: { deep: 1 },\n  method(x):: x,\n  'quoted-key': 2,\n  [\"dyn\" + \"amic\"]: 3,\n}\n",
 	)
 	.unwrap();
-	let uri_of = |rel: &str| format!("file://{}", ws.join(rel).display());
+	let uri_of = |rel: &str| file_uri(&ws.join(rel));
 
 	let mut c = Client::start();
 	c.send(
@@ -475,7 +496,7 @@ fn import_diagnostics_refresh_on_file_changes() {
 	let ws = std::path::Path::new(env!("CARGO_TARGET_TMPDIR")).join("watch-ws");
 	let _ = std::fs::remove_dir_all(&ws);
 	std::fs::create_dir_all(&ws).unwrap();
-	let uri_of = |rel: &str| format!("file://{}", ws.join(rel).display());
+	let uri_of = |rel: &str| file_uri(&ws.join(rel));
 
 	let mut c = Client::start();
 	c.send(
@@ -798,7 +819,7 @@ fn open_buffers_win_over_disk_for_imports() {
 	let _ = std::fs::remove_dir_all(&ws);
 	std::fs::create_dir_all(&ws).unwrap();
 	std::fs::write(ws.join("lib.libsonnet"), "{ old: 1 }").unwrap();
-	let uri_of = |rel: &str| format!("file://{}", ws.join(rel).display());
+	let uri_of = |rel: &str| file_uri(&ws.join(rel));
 
 	let mut c = Client::start();
 	c.send(
@@ -842,7 +863,7 @@ fn open_buffers_win_over_disk_for_imports() {
 #[test]
 fn demo_workspace() {
 	let demo = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("extension/demo");
-	let uri_of = |rel: &str| format!("file://{}", demo.join(rel).display());
+	let uri_of = |rel: &str| file_uri(&demo.join(rel));
 	let main_text = std::fs::read_to_string(demo.join("main.jsonnet")).unwrap();
 	let util_text = std::fs::read_to_string(demo.join("lib/util.libsonnet")).unwrap();
 

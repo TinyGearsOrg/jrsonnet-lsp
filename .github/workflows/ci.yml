@@ -7,6 +7,9 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
+  # Use the latest stable directly, without rustup installing the extra components that
+  # rust-toolchain.toml lists for developers (rust-analyzer, rust-src).
+  RUSTUP_TOOLCHAIN: stable
 
 jobs:
   server:
@@ -16,12 +19,13 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      # rust-toolchain.toml selects the latest stable.
-      - run: rustup toolchain install stable --profile minimal --component rustfmt --component clippy
+      - run: rustup toolchain install stable --profile minimal --component rustfmt --component clippy --target x86_64-unknown-linux-musl
       - uses: Swatinem/rust-cache@v2
       - run: make init
       - run: make lint
       - run: make test-server
+      # The static musl build is what ships for Linux, so test that one too.
+      - run: cargo test --target x86_64-unknown-linux-musl
 
   extension:
     runs-on: ubuntu-latest
@@ -49,3 +53,38 @@ jobs:
         with:
           name: vsix-linux-x64
           path: extension/*.vsix
+
+  # The platforms that are not packaged yet, so problems show up here before a release matrix
+  # entry is enabled for them (see release.yml).
+  other-platforms:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: rustup toolchain install stable --profile minimal
+      - uses: Swatinem/rust-cache@v2
+      - run: ./scripts/setup-jrsonnet.sh
+      - run: cargo test
+      - name: Extension unit tests
+        working-directory: extension
+        run: |
+          npm ci
+          npm run typecheck
+          npm test
+      - name: The extension in a real VS Code
+        working-directory: extension
+        run: |
+          cargo build --release --manifest-path ../Cargo.toml
+          npm run compile
+          npm run test:integration
+        env:
+          VSCODE_VERSION: 1.140.0

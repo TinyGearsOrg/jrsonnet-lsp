@@ -117,7 +117,10 @@ mod tests {
 
 	#[test]
 	fn resolution_order() {
-		let have = |ps: &'static [&str]| move |p: &Path| ps.contains(&p.to_str().unwrap());
+		// Compared with `/` separators, so it holds where paths are joined with a backslash.
+		let have = |ps: &'static [&str]| {
+			move |p: &Path| ps.contains(&p.to_str().unwrap().replace('\\', "/").as_str())
+		};
 		let search = [PathBuf::from("/ws/vendor")];
 		let importer = Some(Path::new("/ws/src/main.jsonnet"));
 		// Importer's directory wins over search paths.

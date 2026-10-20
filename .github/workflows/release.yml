@@ -1,8 +1,8 @@
 name: Release
 
-# Push a tag like v0.1.0 (matching the version in extension/package.json) to build one
-# platform-specific VSIX per target and attach them to a GitHub release. They are also published
-# to the Marketplace when the VSCE_PAT secret is set.
+# Push a tag like v0.1.0 (matching the version in extension/package.json) to build the
+# platform-specific VSIXes and attach them to a GitHub release. They are also published to the
+# Marketplace when the VSCE_PAT secret is set (the token must belong to the TinyGears publisher).
 
 on:
   push:
@@ -10,20 +10,30 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
+  RUSTUP_TOOLCHAIN: stable
 
 jobs:
   build:
     strategy:
       fail-fast: false
       matrix:
+        # `vsce` lists the VS Code targets built from one binary (`vsce package --target`),
+        # `platform` is the VS Code target of the build machine and `rust` the Rust target.
+        #
+        # Linux is a static musl binary: it runs on any distribution regardless of glibc, and is
+        # also the right binary for Alpine.
         include:
-          - { target: linux-x64, os: ubuntu-latest, rust: x86_64-unknown-linux-gnu }
-          # More platforms are one line each. They need nothing else, but are untested:
-          #   - { target: linux-arm64, os: ubuntu-24.04-arm, rust: aarch64-unknown-linux-gnu }
-          #   - { target: darwin-arm64, os: macos-latest, rust: aarch64-apple-darwin }
-          #   - { target: darwin-x64, os: macos-13, rust: x86_64-apple-darwin }
-          #   - { target: win32-x64, os: windows-latest, rust: x86_64-pc-windows-msvc }
-          # `target` is the VS Code target name (what `vsce package --target` takes).
+          - { vsce: 'linux-x64,alpine-x64', platform: linux-x64, os: ubuntu-latest, rust: x86_64-unknown-linux-musl }
+          # The other platforms are one entry each. They compile (checked for every Rust target
+          # below) and the tests run on macOS and Windows in ci.yml, but nothing has been
+          # packaged or run for them yet. Enable an entry once CI is green for its platform:
+          #   - { vsce: darwin-arm64, platform: darwin-arm64, os: macos-latest, rust: aarch64-apple-darwin }
+          #   - { vsce: darwin-x64, platform: darwin-x64, os: macos-latest, rust: x86_64-apple-darwin }
+          #   - { vsce: win32-x64, platform: win32-x64, os: windows-latest, rust: x86_64-pc-windows-msvc }
+          #   - { vsce: win32-arm64, platform: win32-arm64, os: windows-latest, rust: aarch64-pc-windows-msvc }
+          # Linux on ARM needs a native runner (ubuntu-24.04-arm, free for public repositories) or
+          # a cross linker, such as `cargo zigbuild`:
+          #   - { vsce: 'linux-arm64,alpine-arm64', platform: linux-arm64, os: ubuntu-24.04-arm, rust: aarch64-unknown-linux-musl }
     runs-on: ${{ matrix.os }}
     defaults:
       run:
@@ -37,18 +47,19 @@ jobs:
         run: test "v$(node -p "require('./extension/package.json').version")" = "$GITHUB_REF_NAME"
       - run: rustup toolchain install stable --profile minimal --target ${{ matrix.rust }}
       - uses: Swatinem/rust-cache@v2
-      - run: make init
+      - run: ./scripts/setup-jrsonnet.sh
       - run: cargo build --release --target ${{ matrix.rust }}
       - name: Bundle the server and package the extension
         working-directory: extension
         run: |
+          npm ci
           exe=jsonnet-lsp
-          if [ "${{ matrix.target }}" = win32-x64 ]; then exe=jsonnet-lsp.exe; fi
-          node scripts/bundle-server.mjs --platform ${{ matrix.target }} --binary ../target/${{ matrix.rust }}/release/$exe
-          npx vsce package --no-dependencies --target ${{ matrix.target }}
+          case "${{ matrix.platform }}" in win32-*) exe=jsonnet-lsp.exe ;; esac
+          node scripts/bundle-server.mjs --platform ${{ matrix.platform }} --binary ../target/${{ matrix.rust }}/release/$exe
+          node scripts/package.mjs --target ${{ matrix.vsce }}
       - uses: actions/upload-artifact@v4
         with:
-          name: vsix-${{ matrix.target }}
+          name: vsix-${{ matrix.platform }}
           path: extension/*.vsix
 
   publish:

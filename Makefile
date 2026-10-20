@@ -60,7 +60,7 @@ gen-stdlib: ## Regenerate the `std` table from jrsonnet's own evaluator
 bundle: build-server build-extension ## Copy the release server into the extension for this platform
 	cd $(EXT) && npm run bundle-server
 
-package: bundle ## Build the VSIX for this platform (linux-x64 for now)
+package: bundle ## Build a local VSIX for this platform (releases use a static musl binary on Linux, see release.yml)
 	cd $(EXT) && npm run package
 
 clean: ## Remove build outputs (keeps .jrsonnet and node_modules)

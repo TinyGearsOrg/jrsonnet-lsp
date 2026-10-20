@@ -86,9 +86,13 @@ jrsonnet's own `std` provides, including its additions to the standard library.
 
 ## Platforms
 
-Developed and tested on Linux. Windows drive-letter URIs (`file:///c%3A/...` as VS Code sends
-them, or `file:///C:/...`) and path comparison are handled and unit-tested, but the server has not
-been run on Windows. UNC paths (`file://server/share/...`) are not supported.
+Developed and tested on Linux. The Linux release is a static musl binary (also used for Alpine), and
+the whole test suite passes against it. The code type-checks, tests included, for Windows (x64 and
+arm64), macOS (both architectures) and Linux on ARM, but only Linux has been run: CI runs the tests
+and the extension in a real VS Code on macOS and Windows, and releases for them are enabled once
+that is green. Windows drive-letter URIs (`file:///c%3A/...` as VS Code sends them, or
+`file:///C:/...`) and path comparison are handled and unit-tested. UNC paths
+(`file://server/share/...`) are not supported.
 
 ## License
 
