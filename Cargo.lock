@@ -374,7 +374,7 @@ dependencies = [
 
 [[package]]
 name = "jsonnet-lsp"
-version = "0.0.2"
+version = "0.0.3"
 dependencies = [
  "anyhow",
  "jrsonnet-formatter",
