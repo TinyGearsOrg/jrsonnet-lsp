@@ -343,7 +343,6 @@ checksum = "8f42a60cbdf9a97f5d2305f08a87dc4e09308d1276d28c869c684d7777685682"
 [[package]]
 name = "jrsonnet-formatter"
 version = "0.5.0-pre99"
-source = "git+https://github.com/deltarocks/jrsonnet?rev=0648267066e6c135477933c792285de74184e9cb#0648267066e6c135477933c792285de74184e9cb"
 dependencies = [
  "dprint-core",
  "hi-doc",
@@ -356,7 +355,6 @@ dependencies = [
 [[package]]
 name = "jrsonnet-lexer"
 version = "0.5.0-pre99"
-source = "git+https://github.com/deltarocks/jrsonnet?rev=0648267066e6c135477933c792285de74184e9cb#0648267066e6c135477933c792285de74184e9cb"
 dependencies = [
  "logos",
 ]
@@ -364,7 +362,6 @@ dependencies = [
 [[package]]
 name = "jrsonnet-rowan-parser"
 version = "0.5.0-pre99"
-source = "git+https://github.com/deltarocks/jrsonnet?rev=0648267066e6c135477933c792285de74184e9cb#0648267066e6c135477933c792285de74184e9cb"
 dependencies = [
  "anyhow",
  "drop_bomb",

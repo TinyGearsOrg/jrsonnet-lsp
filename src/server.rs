@@ -7,7 +7,7 @@ use std::{
 
 use anyhow::Result;
 use jrsonnet_formatter::{FormatOptions, format};
-use jrsonnet_rowan_parser::SyntaxKind;
+use jrsonnet_rowan_parser::{SyntaxError, SyntaxKind};
 use lsp_server::{Connection, ErrorCode, Message, Notification, Request, Response};
 use lsp_types::{
 	CompletionItem, CompletionItemKind, CompletionOptions, CompletionParams, CompletionResponse,
@@ -560,8 +560,7 @@ fn diagnostics(
 ) -> Vec<Diagnostic> {
 	let syntax = doc.errors.iter().map(|e| Diagnostic {
 		range: doc.range(e.range),
-		// TODO: SyntaxError isn't exported upstream, so `Hint`s can't be told apart.
-		severity: Some(DiagnosticSeverity::ERROR),
+		severity: Some(severity(&e.error)),
 		source: Some("jsonnet-lsp".to_owned()),
 		message: e.error.to_string(),
 		..Default::default()
@@ -638,5 +637,29 @@ fn snippet(node: &jrsonnet_rowan_parser::SyntaxNode) -> String {
 		format!("{cut} …")
 	} else {
 		cut
+	}
+}
+
+fn severity(error: &SyntaxError) -> DiagnosticSeverity {
+	match error {
+		SyntaxError::Hint { .. } => DiagnosticSeverity::HINT,
+		_ => DiagnosticSeverity::ERROR,
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	#[test]
+	fn hints_are_not_errors() {
+		let hint = SyntaxError::Hint {
+			error: "consider this".to_owned(),
+		};
+		let custom = SyntaxError::Custom {
+			error: "broken".to_owned(),
+		};
+		assert_eq!(severity(&hint), DiagnosticSeverity::HINT);
+		assert_eq!(severity(&custom), DiagnosticSeverity::ERROR);
 	}
 }

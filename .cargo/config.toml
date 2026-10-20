@@ -1,0 +1,7 @@
+# Development override: use the local jrsonnet checkout (branch `export-syntax-error`, which
+# exports `SyntaxError`) instead of the pinned upstream rev. Machine specific; drop it once the
+# export is released upstream and the pin in Cargo.toml is bumped.
+[patch."https://github.com/deltarocks/jrsonnet"]
+jrsonnet-lexer = { path = "/home/agentuser/src/jrsonnet/crates/jrsonnet-lexer" }
+jrsonnet-rowan-parser = { path = "/home/agentuser/src/jrsonnet/crates/jrsonnet-rowan-parser" }
+jrsonnet-formatter = { path = "/home/agentuser/src/jrsonnet/crates/jrsonnet-formatter" }
