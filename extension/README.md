@@ -21,8 +21,10 @@ Lookups are static and best effort: calls, conditionals and comprehensions are n
 
 ## Platforms
 
-Only **linux-x64** is packaged for now. On other platforms, build `jsonnet-lsp` yourself (see
-below) and point `jrsonnet-lsp.server.path` at it.
+Packaged for **linux-x64** and **alpine-x64**. The Linux server is a static musl binary, so it
+runs on any distribution whatever its glibc version. On other platforms, build `jsonnet-lsp`
+yourself (see below) and point `jrsonnet-lsp.server.path` at it; macOS and Windows packages are
+planned.
 
 ## Settings
 
@@ -112,15 +114,19 @@ and commit both files.
 
 ### Packaging for other platforms
 
-`vsce package --target <target>` builds a platform-specific VSIX; the server binary for that
-platform goes in `server/<target>/` first:
+A VSIX is built per VS Code target and carries exactly one server binary, in `server/`.
+`bundle-server.mjs` puts a built binary there, and `package.mjs` builds one VSIX per target from
+it, so a single binary can serve several targets (the static Linux one serves `linux-x64` and
+`alpine-x64`):
 
 ```sh
-node scripts/bundle-server.mjs --platform darwin-arm64 --binary path/to/jsonnet-lsp
-npx vsce package --no-dependencies --target darwin-arm64
+node scripts/bundle-server.mjs --platform linux-x64 --binary ../target/x86_64-unknown-linux-musl/release/jsonnet-lsp
+node scripts/package.mjs --target linux-x64,alpine-x64
 ```
 
-CI does this per platform; see `.github/workflows/release.yml`.
+`--platform` only decides whether the binary is called `.exe`. Without arguments both scripts
+use this machine's platform, which is what `make package` does. CI builds the real packages per
+platform; see `.github/workflows/release.yml`, where a platform is one matrix entry.
 
 ## License
 

@@ -1,12 +1,12 @@
-// Copies a built jsonnet-lsp binary into server/<target>/, where the extension looks for it.
+// Copies a built jsonnet-lsp binary to server/, where the extension looks for it. A
+// platform-specific VSIX carries exactly one binary, so there is no per-platform directory.
 //
-//   node scripts/bundle-server.mjs                     # this platform, target/release build
-//   node scripts/bundle-server.mjs --platform linux-arm64 --binary path/to/jsonnet-lsp
+//   node scripts/bundle-server.mjs                     # target/release build, for this platform
+//   node scripts/bundle-server.mjs --platform win32-x64 --binary path/to/jsonnet-lsp.exe
 //
-// <target> is the VS Code target name (linux-x64, darwin-arm64, win32-x64, ...), which is also
-// what `vsce package --target` takes.
+// --platform is the VS Code target name; it only decides whether the file is called `.exe`.
 
-import { chmodSync, copyFileSync, existsSync, mkdirSync } from 'node:fs';
+import { chmodSync, copyFileSync, existsSync, mkdirSync, rmSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
@@ -19,8 +19,7 @@ const { values } = parseArgs({
   },
 });
 
-const platform = values.platform;
-const exe = platform.startsWith('win32') ? 'jsonnet-lsp.exe' : 'jsonnet-lsp';
+const exe = values.platform.startsWith('win32') ? 'jsonnet-lsp.exe' : 'jsonnet-lsp';
 const binary = values.binary ?? join(root, '..', 'target', 'release', exe);
 
 if (!existsSync(binary)) {
@@ -28,7 +27,9 @@ if (!existsSync(binary)) {
   process.exit(1);
 }
 
-const dir = join(root, 'server', platform);
+// Start clean, so a binary left over from another platform can't end up in the package.
+const dir = join(root, 'server');
+rmSync(dir, { recursive: true, force: true });
 mkdirSync(dir, { recursive: true });
 const dest = join(dir, exe);
 copyFileSync(binary, dest);

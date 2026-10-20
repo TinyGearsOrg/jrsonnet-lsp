@@ -1,14 +1,18 @@
 import assert from 'node:assert/strict';
+import * as path from 'node:path';
 import { test } from 'node:test';
 import { binaryName, candidates, resolveServer, target, type Options } from '../src/server.ts';
 
+// Paths are built with `path.join`, so the expectations hold on Windows as well.
+const p = (...parts: string[]) => path.join(path.sep, ...parts);
+
 const base: Options = {
   configured: '',
-  extensionPath: '/ext/jrsonnet-lsp',
+  extensionPath: p('ext', 'jrsonnet-lsp'),
   development: false,
   platform: 'linux',
   arch: 'x64',
-  home: '/home/me',
+  home: p('home', 'me'),
 };
 
 const files = (known: Record<string, number>) => (file: string) => known[file];
@@ -19,35 +23,39 @@ test('target and binary names', () => {
   assert.equal(binaryName('win32'), 'jsonnet-lsp.exe');
 });
 
-test('the bundled binary is used by default', () => {
-  const bundled = '/ext/jrsonnet-lsp/server/linux-x64/jsonnet-lsp';
-  const r = resolveServer(base, files({ [bundled]: 1 }));
-  assert.deepEqual(r, { ok: true, path: bundled, source: 'bundled' });
+test('the bundled binary is used by default, whatever the platform', () => {
+  for (const [platform, arch, bin] of [
+    ['linux', 'x64', 'jsonnet-lsp'],
+    ['linux', 'arm', 'jsonnet-lsp'], // armhf
+    ['darwin', 'arm64', 'jsonnet-lsp'],
+    ['win32', 'x64', 'jsonnet-lsp.exe'],
+  ] as const) {
+    const bundled = path.join(base.extensionPath, 'server', bin);
+    const r = resolveServer({ ...base, platform, arch }, files({ [bundled]: 1 }));
+    assert.deepEqual(r, { ok: true, path: bundled, source: 'bundled' }, `${platform}-${arch}`);
+  }
 });
 
 test('a configured path wins, and is expanded', () => {
-  const r = resolveServer(
-    { ...base, configured: ' ~/bin/jsonnet-lsp ' },
-    files({ '/home/me/bin/jsonnet-lsp': 1, '/ext/jrsonnet-lsp/server/linux-x64/jsonnet-lsp': 1 }),
-  );
-  assert.deepEqual(r, { ok: true, path: '/home/me/bin/jsonnet-lsp', source: 'setting' });
+  const home = path.join(base.home, 'bin', 'jsonnet-lsp');
+  const bundled = path.join(base.extensionPath, 'server', 'jsonnet-lsp');
+  const r = resolveServer({ ...base, configured: ' ~/bin/jsonnet-lsp ' }, files({ [home]: 1, [bundled]: 1 }));
+  assert.deepEqual(r, { ok: true, path: home, source: 'setting' });
 });
 
 test('a configured path that does not exist is an error, not a fallback', () => {
-  const r = resolveServer(
-    { ...base, configured: '/nope/jsonnet-lsp' },
-    files({ '/ext/jrsonnet-lsp/server/linux-x64/jsonnet-lsp': 1 }),
-  );
+  const bundled = path.join(base.extensionPath, 'server', 'jsonnet-lsp');
+  const r = resolveServer({ ...base, configured: p('nope', 'jsonnet-lsp') }, files({ [bundled]: 1 }));
   assert.equal(r.ok, false);
-  assert.match(r.ok ? '' : r.message, /server\.path is set to "\/nope\/jsonnet-lsp"/);
+  assert.ok((r.ok ? '' : r.message).includes(`server.path is set to "${p('nope', 'jsonnet-lsp')}"`));
 });
 
 test('development builds come from the repo, and the newest wins', () => {
   // The extension lives in <repo>/extension, next to <repo>/target.
-  const dev = { ...base, extensionPath: '/repo/extension', development: true };
-  const bundled = '/repo/extension/server/linux-x64/jsonnet-lsp';
-  const debug = '/repo/target/debug/jsonnet-lsp';
-  const release = '/repo/target/release/jsonnet-lsp';
+  const dev = { ...base, extensionPath: p('repo', 'extension'), development: true };
+  const bundled = p('repo', 'extension', 'server', 'jsonnet-lsp');
+  const debug = p('repo', 'target', 'debug', 'jsonnet-lsp');
+  const release = p('repo', 'target', 'release', 'jsonnet-lsp');
   assert.deepEqual(candidates(dev).map((c) => c.path), [bundled, debug, release]);
 
   assert.deepEqual(resolveServer(dev, files({ [debug]: 5, [release]: 9 })), {
@@ -82,6 +90,6 @@ test('a missing binary explains where it looked and what to do', () => {
   assert.equal(r.ok, false);
   const message = r.ok ? '' : r.message;
   assert.match(message, /darwin-arm64/);
-  assert.match(message, /server\/darwin-arm64\/jsonnet-lsp/);
+  assert.ok(message.includes(path.join('server', 'jsonnet-lsp')));
   assert.match(message, /jrsonnet-lsp\.server\.path/);
 });

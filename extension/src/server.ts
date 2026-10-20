@@ -23,7 +23,7 @@ export interface Options {
 
 export type Resolved = { ok: true; path: string; source: Source } | { ok: false; message: string };
 
-/** The VS Code target name for a platform, e.g. `linux-x64`; the bundled binary's directory. */
+/** The platform and architecture as VS Code names them, e.g. `linux-x64`, for messages. */
 export function target(platform: string, arch: string): string {
   return `${platform}-${arch}`;
 }
@@ -44,9 +44,9 @@ export function candidates(o: Options): Candidate[] {
     return [{ path: expandHome(configured, o.home), source: 'setting' }];
   }
   const bin = binaryName(o.platform);
-  const list: Candidate[] = [
-    { path: path.join(o.extensionPath, 'server', target(o.platform, o.arch), bin), source: 'bundled' },
-  ];
+  // A platform-specific VSIX carries exactly one binary, so it doesn't need a per-platform
+  // directory (which would not match anyway for Alpine, where VS Code reports `linux`).
+  const list: Candidate[] = [{ path: path.join(o.extensionPath, 'server', bin), source: 'bundled' }];
   if (o.development) {
     // <repo>/extension/../target
     const cargoTarget = path.join(o.extensionPath, '..', 'target');

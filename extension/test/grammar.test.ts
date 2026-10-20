@@ -23,8 +23,9 @@ before(async () => {
       if (scope !== 'source.jsonnet') {
         return null;
       }
-      const path = new URL('../syntaxes/jsonnet.tmLanguage.json', import.meta.url);
-      return parseRawGrammar(readFileSync(path, 'utf8'), path.pathname);
+      // A URL object (not its `pathname`) works with fs on every platform.
+      const url = new URL('../syntaxes/jsonnet.tmLanguage.json', import.meta.url);
+      return parseRawGrammar(readFileSync(url, 'utf8'), 'jsonnet.tmLanguage.json');
     },
   });
   const loaded = await registry.loadGrammar('source.jsonnet');
