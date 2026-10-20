@@ -5,7 +5,7 @@ formatter from [jrsonnet](https://github.com/deltarocks/jrsonnet), so it can fol
 jrsonnet's language extensions. It talks LSP over stdio.
 
 Early work in progress. A VS Code extension that bundles the server lives in
-[`editors/vscode`](editors/vscode); its README has setup and a manual test checklist.
+[`extension`](extension); its README has setup and a manual test checklist.
 
 ## Supported
 

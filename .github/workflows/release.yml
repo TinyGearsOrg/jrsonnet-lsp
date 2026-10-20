@@ -1,6 +1,6 @@
 name: Release
 
-# Push a tag like v0.1.0 (matching the version in editors/vscode/package.json) to build one
+# Push a tag like v0.1.0 (matching the version in extension/package.json) to build one
 # platform-specific VSIX per target and attach them to a GitHub release. They are also published
 # to the Marketplace when the VSCE_PAT secret is set.
 
@@ -34,22 +34,22 @@ jobs:
         with:
           node-version: 22
       - name: The tag matches the extension's version
-        run: test "v$(node -p "require('./editors/vscode/package.json').version")" = "$GITHUB_REF_NAME"
+        run: test "v$(node -p "require('./extension/package.json').version")" = "$GITHUB_REF_NAME"
       - run: rustup toolchain install stable --profile minimal --target ${{ matrix.rust }}
       - uses: Swatinem/rust-cache@v2
       - run: make init
       - run: cargo build --release --target ${{ matrix.rust }}
       - name: Bundle the server and package the extension
-        working-directory: editors/vscode
+        working-directory: extension
         run: |
           exe=jsonnet-lsp
           if [ "${{ matrix.target }}" = win32-x64 ]; then exe=jsonnet-lsp.exe; fi
-          node scripts/bundle-server.mjs --platform ${{ matrix.target }} --binary ../../target/${{ matrix.rust }}/release/$exe
+          node scripts/bundle-server.mjs --platform ${{ matrix.target }} --binary ../target/${{ matrix.rust }}/release/$exe
           npx vsce package --no-dependencies --target ${{ matrix.target }}
       - uses: actions/upload-artifact@v4
         with:
           name: vsix-${{ matrix.target }}
-          path: editors/vscode/*.vsix
+          path: extension/*.vsix
 
   publish:
     needs: build
@@ -73,7 +73,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
       - name: Publish to the Marketplace
         if: ${{ env.VSCE_PAT != '' }}
-        working-directory: editors/vscode
+        working-directory: extension
         run: |
           npm ci
-          npx vsce publish --packagePath ../../dist/*.vsix
+          npx vsce publish --packagePath ../dist/*.vsix

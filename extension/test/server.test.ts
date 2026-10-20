@@ -43,9 +43,9 @@ test('a configured path that does not exist is an error, not a fallback', () => 
 });
 
 test('development builds come from the repo, and the newest wins', () => {
-  // The extension lives in <repo>/editors/vscode, next to <repo>/target.
-  const dev = { ...base, extensionPath: '/repo/editors/vscode', development: true };
-  const bundled = '/repo/editors/vscode/server/linux-x64/jsonnet-lsp';
+  // The extension lives in <repo>/extension, next to <repo>/target.
+  const dev = { ...base, extensionPath: '/repo/extension', development: true };
+  const bundled = '/repo/extension/server/linux-x64/jsonnet-lsp';
   const debug = '/repo/target/debug/jsonnet-lsp';
   const release = '/repo/target/release/jsonnet-lsp';
   assert.deepEqual(candidates(dev).map((c) => c.path), [bundled, debug, release]);

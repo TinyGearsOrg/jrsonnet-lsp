@@ -841,7 +841,7 @@ fn open_buffers_win_over_disk_for_imports() {
 /// is checked here, so the demo can't silently rot.
 #[test]
 fn demo_workspace() {
-	let demo = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("editors/vscode/demo");
+	let demo = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("extension/demo");
 	let uri_of = |rel: &str| format!("file://{}", demo.join(rel).display());
 	let main_text = std::fs::read_to_string(demo.join("main.jsonnet")).unwrap();
 	let util_text = std::fs::read_to_string(demo.join("lib/util.libsonnet")).unwrap();

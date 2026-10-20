@@ -48,8 +48,8 @@ export function candidates(o: Options): Candidate[] {
     { path: path.join(o.extensionPath, 'server', target(o.platform, o.arch), bin), source: 'bundled' },
   ];
   if (o.development) {
-    // editors/vscode/../../target
-    const cargoTarget = path.join(o.extensionPath, '..', '..', 'target');
+    // <repo>/extension/../target
+    const cargoTarget = path.join(o.extensionPath, '..', 'target');
     for (const profile of ['debug', 'release']) {
       list.push({ path: path.join(cargoTarget, profile, bin), source: 'development' });
     }

@@ -62,8 +62,8 @@ make package  # VSIX for this platform, with the server bundled
 ### Trying it by hand
 
 1. `make init build`
-2. Open `editors/vscode` in VS Code and press **F5** (*Run Extension (demo workspace)*). A second
-   window opens on `editors/vscode/demo` with the extension loaded from source. When it runs from
+2. Open `extension` in VS Code and press **F5** (*Run Extension (demo workspace)*). A second
+   window opens on `extension/demo` with the extension loaded from source. When it runs from
    source, the extension uses the newest of `target/debug/jsonnet-lsp`, `target/release/jsonnet-lsp`
    and a bundled binary, so `cargo build` followed by *Jsonnet: Restart Language Server* picks up
    server changes.
@@ -71,7 +71,7 @@ make package  # VSIX for this platform, with the server bundled
    is for judging syntax highlighting.
 
 To try the packaged extension instead: `make package`, then
-`code --install-extension editors/vscode/jrsonnet-lsp-linux-x64-0.0.1.vsix`.
+`code --install-extension extension/jrsonnet-lsp-linux-x64-0.0.1.vsix`.
 
 ### Checklist for `demo/main.jsonnet`
 

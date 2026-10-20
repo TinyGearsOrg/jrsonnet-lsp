@@ -21,7 +21,7 @@ const { values } = parseArgs({
 
 const platform = values.platform;
 const exe = platform.startsWith('win32') ? 'jsonnet-lsp.exe' : 'jsonnet-lsp';
-const binary = values.binary ?? join(root, '..', '..', 'target', 'release', exe);
+const binary = values.binary ?? join(root, '..', 'target', 'release', exe);
 
 if (!existsSync(binary)) {
   console.error(`No server binary at ${binary}. Build it first (make build-server) or pass --binary.`);

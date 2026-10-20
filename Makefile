@@ -1,7 +1,7 @@
 # Common tasks for the language server and the VS Code extension.
 # `make` lists the targets.
 
-EXT := editors/vscode
+EXT := extension
 
 .DEFAULT_GOAL := help
 .PHONY: help init build build-server build-extension test test-server test-extension \

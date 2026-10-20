@@ -37,7 +37,7 @@ jobs:
       # The integration tests start a real VS Code under a virtual display.
       - uses: actions/cache@v4
         with:
-          path: editors/vscode/.vscode-test
+          path: extension/.vscode-test
           key: vscode-${{ runner.os }}-1.140.0
       - run: make build-server
       - run: xvfb-run -a make test-integration
@@ -48,4 +48,4 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: vsix-linux-x64
-          path: editors/vscode/*.vsix
+          path: extension/*.vsix
