@@ -83,6 +83,10 @@ Once the export is released upstream, bump the rev and delete the script, `patch
 `cargo test` (or `make test-server`) runs unit tests plus end-to-end tests that drive the binary
 over stdio. `make test-integration` starts a real VS Code and tests the extension through its API.
 
+Local hooks (whitespace, shellcheck for the scripts, zizmor for the workflows) are configured in
+`.pre-commit-config.yaml`. Run them with [prek](https://github.com/j178/prek) (`prek install`, then
+`prek run --all-files`) or with pre-commit.
+
 `cargo run --example dump -- '<jsonnet>'` prints the CST for a snippet, which is handy since the
 parser's tree doesn't always match `jsonnet.ungram`.
 

@@ -25,4 +25,5 @@ for p in patches/*.patch; do
 	git -C .jrsonnet apply "../$p"
 done
 echo "$stamp" > .jrsonnet/.stamp
-echo "prepared .jrsonnet at $rev with $(ls patches/*.patch | wc -l) patch(es)"
+set -- patches/*.patch
+echo "prepared .jrsonnet at $rev with $# patch(es)"
