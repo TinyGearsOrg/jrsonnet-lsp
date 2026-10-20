@@ -100,3 +100,73 @@ fn diagnostics_and_formatting() {
 	drop(c.stdin);
 	assert!(c.child.wait().unwrap().success());
 }
+
+impl Client {
+	fn initialize(&mut self) {
+		self.send(json!({"jsonrpc":"2.0","id":0,"method":"initialize","params":{"capabilities":{}}}));
+		self.recv();
+		self.send(json!({"jsonrpc":"2.0","method":"initialized","params":{}}));
+	}
+
+	/// Opens a document and returns its published diagnostics.
+	fn open(&mut self, uri: &str, text: &str) -> Value {
+		self.send(json!({"jsonrpc":"2.0","method":"textDocument/didOpen","params":{
+			"textDocument":{"uri":uri,"languageId":"jsonnet","version":1,"text":text}}}));
+		self.recv()["params"]["diagnostics"].clone()
+	}
+
+	fn request(&mut self, id: i64, method: &str, params: Value) -> Value {
+		self.send(json!({"jsonrpc":"2.0","id":id,"method":method,"params":params}));
+		let resp = self.recv();
+		assert_eq!(resp["id"], id);
+		resp
+	}
+
+	fn finish(mut self) {
+		self.send(json!({"jsonrpc":"2.0","id":99,"method":"shutdown"}));
+		self.recv();
+		self.send(json!({"jsonrpc":"2.0","method":"exit"}));
+		drop(self.stdin);
+		assert!(self.child.wait().unwrap().success());
+	}
+}
+
+#[test]
+fn navigation_and_rename() {
+	let mut c = Client::start();
+	c.initialize();
+	let uri = "file:///t.jsonnet";
+	// The string has a 2-byte and a 4-byte char (1 and 2 UTF-16 units); columns must line up.
+	let diags = c.open(uri, "local s = \"é😀\"; local a = 1;\nlocal f(x) = x + a;\nf(a) + nope");
+	let diags = diags.as_array().unwrap();
+	assert_eq!(diags.len(), 1);
+	assert_eq!(diags[0]["message"], "undefined variable `nope`");
+	assert_eq!(diags[0]["range"]["start"], json!({"line":2,"character":7}));
+
+	let at = |line, character| json!({"textDocument":{"uri":uri},"position":{"line":line,"character":character}});
+
+	// Definition from the use in `f(é)` goes to the `local a` declaration.
+	let def = c.request(1, "textDocument/definition", at(2, 2));
+	assert_eq!(def["result"]["range"]["start"], json!({"line":0,"character":23}));
+
+	let mut refs_params = at(0, 23);
+	refs_params["context"] = json!({"includeDeclaration": true});
+	let refs = c.request(2, "textDocument/references", refs_params);
+	assert_eq!(refs["result"].as_array().unwrap().len(), 3);
+
+	let prep = c.request(3, "textDocument/prepareRename", at(2, 2));
+	assert_eq!(prep["result"]["start"], json!({"line":2,"character":2}));
+	// `std` and unresolved names can't be renamed.
+	assert!(c.request(4, "textDocument/prepareRename", at(2, 7))["result"].is_null());
+
+	let mut rename = at(0, 23);
+	rename["newName"] = json!("val");
+	let edits = c.request(5, "textDocument/rename", rename.clone());
+	assert_eq!(edits["result"]["changes"][uri].as_array().unwrap().len(), 3);
+
+	rename["newName"] = json!("local");
+	let err = c.request(6, "textDocument/rename", rename);
+	assert!(err["error"]["message"].as_str().unwrap().contains("not a valid identifier"));
+
+	c.finish();
+}

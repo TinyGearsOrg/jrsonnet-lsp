@@ -2,31 +2,69 @@ use std::collections::HashMap;
 
 use anyhow::Result;
 use jrsonnet_formatter::{FormatOptions, format};
-use jrsonnet_rowan_parser::parse;
-use lsp_server::{Connection, Message, Notification, Request, Response};
+use jrsonnet_rowan_parser::{
+	AstNode, LocatedSyntaxError, SyntaxKind, SyntaxNode, SyntaxToken, parse, rowan::TextRange,
+};
+use lsp_server::{Connection, ErrorCode, Message, Notification, Request, Response};
 use lsp_types::{
 	Diagnostic, DiagnosticSeverity, DidChangeTextDocumentParams, DidCloseTextDocumentParams,
-	DidOpenTextDocumentParams, DocumentFormattingParams, InitializeParams, OneOf,
-	PublishDiagnosticsParams, ServerCapabilities, TextDocumentSyncCapability,
-	TextDocumentSyncKind, TextEdit, Uri,
+	DidOpenTextDocumentParams, DocumentFormattingParams, GotoDefinitionParams,
+	GotoDefinitionResponse, InitializeParams, Location, OneOf, Position, PrepareRenameResponse,
+	PublishDiagnosticsParams, ReferenceParams, RenameOptions, RenameParams, ServerCapabilities,
+	TextDocumentPositionParams, TextDocumentSyncCapability, TextDocumentSyncKind, TextEdit, Uri,
+	WorkspaceEdit,
 	notification::{
 		DidChangeTextDocument, DidCloseTextDocument, DidOpenTextDocument, Notification as _,
 		PublishDiagnostics,
 	},
-	request::{Formatting, Request as _},
+	request::{
+		Formatting, GotoDefinition, PrepareRenameRequest, References, Rename, Request as _,
+	},
 };
 
-use crate::line_index::LineIndex;
+use crate::{
+	line_index::LineIndex,
+	scope::{self, Decl, Resolution},
+};
 
 struct Document {
 	text: String,
 	index: LineIndex,
+	root: SyntaxNode,
+	errors: Vec<LocatedSyntaxError>,
 }
 
 impl Document {
 	fn new(text: String) -> Self {
 		let index = LineIndex::new(&text);
-		Self { text, index }
+		let (root, errors) = parse(&text);
+		Self {
+			text,
+			index,
+			root: root.syntax().clone(),
+			errors,
+		}
+	}
+
+	fn range(&self, r: TextRange) -> lsp_types::Range {
+		self.index
+			.range(&self.text, usize::from(r.start()), usize::from(r.end()))
+	}
+
+	/// The identifier token under the cursor, if any.
+	fn ident_at(&self, pos: Position) -> Option<SyntaxToken> {
+		let offset = self.index.offset(&self.text, pos)?;
+		self.root
+			.token_at_offset(u32::try_from(offset).ok()?.into())
+			.find(|t| t.kind() == SyntaxKind::IDENT)
+	}
+
+	/// The local declaration the identifier at `pos` refers to or declares.
+	fn decl_at(&self, pos: Position) -> Option<Decl> {
+		match scope::decl_at(&self.root, &self.ident_at(pos)?)? {
+			Resolution::Local(d) => Some(d),
+			Resolution::Std | Resolution::Unresolved => None,
+		}
 	}
 }
 
@@ -35,6 +73,12 @@ pub fn run() -> Result<()> {
 	let capabilities = serde_json::to_value(ServerCapabilities {
 		text_document_sync: Some(TextDocumentSyncCapability::Kind(TextDocumentSyncKind::FULL)),
 		document_formatting_provider: Some(OneOf::Left(true)),
+		definition_provider: Some(OneOf::Left(true)),
+		references_provider: Some(OneOf::Left(true)),
+		rename_provider: Some(OneOf::Right(RenameOptions {
+			prepare_provider: Some(true),
+			work_done_progress_options: Default::default(),
+		})),
 		..Default::default()
 	})?;
 	let init = connection.initialize(capabilities)?;
@@ -76,19 +120,41 @@ impl Server<'_> {
 	}
 
 	fn on_request(&mut self, req: Request) -> Result<()> {
-		let resp = match req.method.as_str() {
-			Formatting::METHOD => {
-				let params: DocumentFormattingParams = serde_json::from_value(req.params)?;
-				Response::new_ok(req.id, self.formatting(&params))
-			}
-			_ => Response::new_err(
-				req.id,
-				lsp_server::ErrorCode::MethodNotFound as i32,
-				format!("unsupported request {}", req.method),
-			),
+		let id = req.id.clone();
+		let resp = match self.handle_request(req) {
+			Ok(result) => Response {
+				id,
+				result: Some(result),
+				error: None,
+			},
+			Err((code, message)) => Response::new_err(id, code as i32, message),
 		};
 		self.connection.sender.send(resp.into())?;
 		Ok(())
+	}
+
+	fn handle_request(
+		&mut self,
+		req: Request,
+	) -> std::result::Result<serde_json::Value, (ErrorCode, String)> {
+		fn params<T: serde::de::DeserializeOwned>(
+			req: &Request,
+		) -> std::result::Result<T, (ErrorCode, String)> {
+			serde_json::from_value(req.params.clone())
+				.map_err(|e| (ErrorCode::InvalidParams, e.to_string()))
+		}
+		fn json<T: serde::Serialize>(v: T) -> std::result::Result<serde_json::Value, (ErrorCode, String)> {
+			serde_json::to_value(v).map_err(|e| (ErrorCode::InternalError, e.to_string()))
+		}
+
+		match req.method.as_str() {
+			Formatting::METHOD => json(self.formatting(&params(&req)?)),
+			GotoDefinition::METHOD => json(self.definition(&params(&req)?)),
+			References::METHOD => json(self.references(&params(&req)?)),
+			PrepareRenameRequest::METHOD => json(self.prepare_rename(&params(&req)?)),
+			Rename::METHOD => self.rename(&params(&req)?).and_then(json),
+			m => Err((ErrorCode::MethodNotFound, format!("unsupported request {m}"))),
+		}
 	}
 
 	fn on_notification(&mut self, not: Notification) -> Result<()> {
@@ -149,23 +215,89 @@ impl Server<'_> {
 		}
 		Some(vec![TextEdit::new(doc.index.full_range(&doc.text), formatted)])
 	}
+
+	fn definition(&self, params: &GotoDefinitionParams) -> Option<GotoDefinitionResponse> {
+		let pos = &params.text_document_position_params;
+		let doc = self.docs.get(&pos.text_document.uri)?;
+		let decl = doc.decl_at(pos.position)?;
+		Some(GotoDefinitionResponse::Scalar(Location::new(
+			pos.text_document.uri.clone(),
+			doc.range(decl.range),
+		)))
+	}
+
+	fn references(&self, params: &ReferenceParams) -> Option<Vec<Location>> {
+		let pos = &params.text_document_position;
+		let doc = self.docs.get(&pos.text_document.uri)?;
+		let decl = doc.decl_at(pos.position)?;
+		let mut ranges = scope::references(&doc.root, &decl);
+		if params.context.include_declaration {
+			ranges.insert(0, decl.range);
+		}
+		Some(
+			ranges
+				.into_iter()
+				.map(|r| Location::new(pos.text_document.uri.clone(), doc.range(r)))
+				.collect(),
+		)
+	}
+
+	fn prepare_rename(&self, params: &TextDocumentPositionParams) -> Option<PrepareRenameResponse> {
+		let doc = self.docs.get(&params.text_document.uri)?;
+		// Only names that resolve to a local can be renamed: not `std`, not fields.
+		doc.decl_at(params.position)?;
+		let tok = doc.ident_at(params.position)?;
+		Some(PrepareRenameResponse::Range(doc.range(tok.text_range())))
+	}
+
+	fn rename(&self, params: &RenameParams) -> std::result::Result<Option<WorkspaceEdit>, (ErrorCode, String)> {
+		let pos = &params.text_document_position;
+		if !scope::is_valid_ident(&params.new_name) {
+			return Err((
+				ErrorCode::InvalidParams,
+				format!("`{}` is not a valid identifier", params.new_name),
+			));
+		}
+		let Some(doc) = self.docs.get(&pos.text_document.uri) else {
+			return Ok(None);
+		};
+		let Some(decl) = doc.decl_at(pos.position) else {
+			return Ok(None);
+		};
+		let edits = std::iter::once(decl.range)
+			.chain(scope::references(&doc.root, &decl))
+			.map(|r| TextEdit::new(doc.range(r), params.new_name.clone()))
+			.collect();
+		Ok(Some(WorkspaceEdit {
+			changes: Some(HashMap::from([(pos.text_document.uri.clone(), edits)])),
+			..Default::default()
+		}))
+	}
 }
 
 fn diagnostics(doc: &Document) -> Vec<Diagnostic> {
-	let (_, errors) = parse(&doc.text);
-	errors
+	let syntax = doc.errors.iter().map(|e| Diagnostic {
+		range: doc.range(e.range),
+		// TODO: SyntaxError isn't exported upstream, so `Hint`s can't be told apart.
+		severity: Some(DiagnosticSeverity::ERROR),
+		source: Some("jsonnet-lsp".to_owned()),
+		message: e.error.to_string(),
+		..Default::default()
+	});
+	// Name resolution on a tree with syntax errors reports too much noise.
+	let unresolved = doc
+		.errors
+		.is_empty()
+		.then(|| scope::uses(&doc.root))
 		.into_iter()
-		.map(|e| {
-			let start = usize::from(e.range.start());
-			let end = usize::from(e.range.end());
-			Diagnostic {
-				range: doc.index.range(&doc.text, start, end),
-				// TODO: SyntaxError isn't exported upstream, so `Hint`s can't be told apart.
-				severity: Some(DiagnosticSeverity::ERROR),
-				source: Some("jsonnet-lsp".to_owned()),
-				message: e.error.to_string(),
-				..Default::default()
-			}
-		})
-		.collect()
+		.flatten()
+		.filter(|(_, r)| *r == Resolution::Unresolved)
+		.map(|(name, _)| Diagnostic {
+			range: doc.range(name.range),
+			severity: Some(DiagnosticSeverity::ERROR),
+			source: Some("jsonnet-lsp".to_owned()),
+			message: format!("undefined variable `{}`", name.name),
+			..Default::default()
+		});
+	syntax.chain(unresolved).collect()
 }

@@ -24,6 +24,20 @@ impl LineIndex {
 		Position::new(line as u32, col as u32)
 	}
 
+	/// Byte offset for an LSP position; columns past the end of a line clamp to it.
+	pub fn offset(&self, text: &str, pos: Position) -> Option<usize> {
+		let start = *self.starts.get(pos.line as usize)?;
+		let end = self.starts.get(pos.line as usize + 1).copied().unwrap_or(text.len());
+		let mut units = 0;
+		for (i, c) in text[start..end].char_indices() {
+			if units >= pos.character || c == '\n' {
+				return Some(start + i);
+			}
+			units += c.len_utf16() as u32;
+		}
+		Some(end)
+	}
+
 	pub fn range(&self, text: &str, start: usize, end: usize) -> Range {
 		Range::new(self.position(text, start), self.position(text, end))
 	}
@@ -46,5 +60,8 @@ mod tests {
 		assert_eq!(idx.position(text, 2), Position::new(1, 0));
 		assert_eq!(idx.position(text, 6), Position::new(1, 2));
 		assert_eq!(idx.position(text, text.len()), Position::new(2, 0));
+		assert_eq!(idx.offset(text, Position::new(1, 2)), Some(6));
+		assert_eq!(idx.offset(text, Position::new(1, 99)), Some(7));
+		assert_eq!(idx.offset(text, Position::new(9, 0)), None);
 	}
 }
