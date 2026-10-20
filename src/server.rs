@@ -1,16 +1,19 @@
 use std::{
+	cell::RefCell,
 	collections::HashMap,
 	path::{Path, PathBuf},
+	rc::Rc,
 };
 
 use anyhow::Result;
 use jrsonnet_formatter::{FormatOptions, format};
 use jrsonnet_rowan_parser::{
-	AstNode, LocatedSyntaxError, SyntaxKind, SyntaxNode, SyntaxToken, parse, rowan::TextRange,
+	SyntaxKind,
 };
 use lsp_server::{Connection, ErrorCode, Message, Notification, Request, Response};
 use lsp_types::{
 	Diagnostic, DiagnosticSeverity, DidChangeTextDocumentParams, DidCloseTextDocumentParams,
+	CompletionItem, CompletionItemKind, CompletionOptions, CompletionParams, CompletionResponse,
 	DocumentLink, DocumentLinkOptions, DocumentLinkParams,
 	DidOpenTextDocumentParams, DocumentFormattingParams, GotoDefinitionParams,
 	GotoDefinitionResponse, InitializeParams, Location, OneOf, Position, PrepareRenameResponse,
@@ -22,66 +25,18 @@ use lsp_types::{
 		PublishDiagnostics,
 	},
 	request::{
-		DocumentLinkRequest, Formatting, GotoDefinition, PrepareRenameRequest, References, Rename,
+		Completion, DocumentLinkRequest, Formatting, GotoDefinition, PrepareRenameRequest, References, Rename,
 		Request as _,
 	},
 };
 
 use crate::{
+	document::Document,
+	fields::{self, Fields, Files},
 	imports,
-	line_index::LineIndex,
-	scope::{self, Decl, Resolution},
+	scope::{self, Resolution},
 	uri,
 };
-
-struct Document {
-	text: String,
-	index: LineIndex,
-	root: SyntaxNode,
-	errors: Vec<LocatedSyntaxError>,
-}
-
-impl Document {
-	fn new(text: String) -> Self {
-		let index = LineIndex::new(&text);
-		let (root, errors) = parse(&text);
-		Self {
-			text,
-			index,
-			root: root.syntax().clone(),
-			errors,
-		}
-	}
-
-	fn range(&self, r: TextRange) -> lsp_types::Range {
-		self.index
-			.range(&self.text, usize::from(r.start()), usize::from(r.end()))
-	}
-
-	/// The identifier token under the cursor, if any.
-	fn ident_at(&self, pos: Position) -> Option<SyntaxToken> {
-		let offset = self.index.offset(&self.text, pos)?;
-		self.root
-			.token_at_offset(u32::try_from(offset).ok()?.into())
-			.find(|t| t.kind() == SyntaxKind::IDENT)
-	}
-
-	/// The import whose path string is under the cursor.
-	fn import_at(&self, pos: Position) -> Option<imports::Import> {
-		let offset = u32::try_from(self.index.offset(&self.text, pos)?).ok()?;
-		imports::imports(&self.root)
-			.into_iter()
-			.find(|i| i.range.contains_inclusive(offset.into()))
-	}
-
-	/// The local declaration the identifier at `pos` refers to or declares.
-	fn decl_at(&self, pos: Position) -> Option<Decl> {
-		match scope::decl_at(&self.root, &self.ident_at(pos)?)? {
-			Resolution::Local(d) => Some(d),
-			Resolution::Std | Resolution::Unresolved => None,
-		}
-	}
-}
 
 pub fn run() -> Result<()> {
 	let (connection, io_threads) = Connection::stdio();
@@ -94,6 +49,10 @@ pub fn run() -> Result<()> {
 			prepare_provider: Some(true),
 			work_done_progress_options: Default::default(),
 		})),
+		completion_provider: Some(CompletionOptions {
+			trigger_characters: Some(vec![".".to_owned()]),
+			..Default::default()
+		}),
 		document_link_provider: Some(DocumentLinkOptions {
 			resolve_provider: Some(false),
 			work_done_progress_options: Default::default(),
@@ -143,9 +102,36 @@ fn search_paths(params: &InitializeParams) -> Vec<PathBuf> {
 	out
 }
 
+
+/// Finds imported files among the open buffers first, then on disk, parsing each at most once
+/// per request.
+struct Loader<'a> {
+	docs: &'a HashMap<Uri, Rc<Document>>,
+	search: &'a [PathBuf],
+	cache: RefCell<HashMap<PathBuf, Option<Rc<Document>>>>,
+}
+
+impl Files for Loader<'_> {
+	fn import(&self, from: &Document, path: &str) -> Option<Rc<Document>> {
+		let importer = uri::to_path(&from.uri);
+		let target = imports::resolve(importer.as_deref(), path, self.search, Path::is_file)?;
+		let uri = uri::from_path(&target)?;
+		if let Some(open) = self.docs.get(&uri) {
+			return Some(open.clone());
+		}
+		self.cache
+			.borrow_mut()
+			.entry(target.clone())
+			.or_insert_with(|| {
+				let text = std::fs::read_to_string(&target).ok()?;
+				Some(Rc::new(Document::new(uri, text)))
+			})
+			.clone()
+	}
+}
 struct Server<'a> {
 	connection: &'a Connection,
-	docs: HashMap<Uri, Document>,
+	docs: HashMap<Uri, Rc<Document>>,
 	search: Vec<PathBuf>,
 }
 
@@ -203,6 +189,7 @@ impl Server<'_> {
 			PrepareRenameRequest::METHOD => json(self.prepare_rename(&params(&req)?)),
 			Rename::METHOD => self.rename(&params(&req)?).and_then(json),
 			DocumentLinkRequest::METHOD => json(self.document_links(&params(&req)?)),
+			Completion::METHOD => json(self.completion(&params(&req)?)),
 			m => Err((ErrorCode::MethodNotFound, format!("unsupported request {m}"))),
 		}
 	}
@@ -231,7 +218,7 @@ impl Server<'_> {
 	}
 
 	fn update(&mut self, uri: Uri, text: String) -> Result<()> {
-		let doc = Document::new(text);
+		let doc = Rc::new(Document::new(uri.clone(), text));
 		let diagnostics = diagnostics(&doc, |path| self.resolve_import(&uri, path));
 		self.docs.insert(uri.clone(), doc);
 		self.publish(uri, diagnostics)
@@ -291,6 +278,57 @@ impl Server<'_> {
 		)
 	}
 
+	fn loader(&self) -> Loader<'_> {
+		Loader {
+			docs: &self.docs,
+			search: &self.search,
+			cache: RefCell::default(),
+		}
+	}
+
+	/// The `.name` suffix whose name or dot the cursor is in or just after.
+	fn suffix_index_at(doc: &Document, pos: Position) -> Option<jrsonnet_rowan_parser::SyntaxNode> {
+		let offset = doc.offset(pos)?;
+		let tok = doc.root.token_at_offset(offset.into()).left_biased()?;
+		tok.parent_ancestors().find(|n| n.kind() == SyntaxKind::SUFFIX_INDEX)
+	}
+
+	/// Fields of the object that the `.name` under the cursor is being looked up in.
+	fn fields_at(&self, doc: &Rc<Document>, pos: Position) -> Option<Fields> {
+		let suffix = Self::suffix_index_at(doc, pos)?;
+		fields::before_suffix(&self.loader(), doc, &suffix)
+	}
+
+	fn completion(&self, params: &CompletionParams) -> Option<CompletionResponse> {
+		let pos = &params.text_document_position;
+		let doc = self.docs.get(&pos.text_document.uri)?;
+		let items = self
+			.fields_at(doc, pos.position)?
+			.into_iter()
+			.map(|f| CompletionItem {
+				label: f.name,
+				kind: Some(CompletionItemKind::FIELD),
+				..Default::default()
+			})
+			.collect();
+		Some(CompletionResponse::Array(items))
+	}
+
+	/// Go to the declaration of the field named by the identifier under the cursor in `x.name`.
+	fn field_definition(&self, doc: &Rc<Document>, pos: Position) -> Option<Location> {
+		let tok = doc.ident_at(pos)?;
+		let name = tok.parent()?;
+		// Only the name of a `.name` suffix, not the object expression before it.
+		if name.parent()?.kind() != SyntaxKind::SUFFIX_INDEX {
+			return None;
+		}
+		let field = self
+			.fields_at(doc, pos)?
+			.into_iter()
+			.find(|f| f.name == tok.text())?;
+		Some(Location::new(field.doc.uri.clone(), field.doc.range(field.name_range)))
+	}
+
 	fn definition(&self, params: &GotoDefinitionParams) -> Option<GotoDefinitionResponse> {
 		let pos = &params.text_document_position_params;
 		let doc = self.docs.get(&pos.text_document.uri)?;
@@ -301,6 +339,9 @@ impl Server<'_> {
 				target,
 				lsp_types::Range::new(start, start),
 			)));
+		}
+		if let Some(loc) = self.field_definition(doc, pos.position) {
+			return Some(GotoDefinitionResponse::Scalar(loc));
 		}
 		let decl = doc.decl_at(pos.position)?;
 		Some(GotoDefinitionResponse::Scalar(Location::new(

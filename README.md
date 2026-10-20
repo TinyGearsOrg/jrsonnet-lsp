@@ -15,6 +15,9 @@ Early work in progress. It talks LSP over stdio: `cargo run`.
 
 - `import`, `importstr` and `importbin` paths: go to the imported file, clickable links,
   and a warning when the file can't be found
+- Go to definition of `x.field` and completion after `.`, following object literals, `+`,
+  parentheses, `local` names, `import`s and chained fields across files (static, best effort:
+  no calls, conditionals, `self`/`super` or `std`)
 
 ## Import search paths
 
@@ -26,9 +29,8 @@ warning, since the real run may use different `-J` paths.
 
 ## Planned
 
-- Cross-file navigation into imported objects' fields
+XX
 - Document symbols, `std.*` completion and hover
-- Field completion
 
 ## Development
 

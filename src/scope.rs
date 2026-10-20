@@ -6,7 +6,7 @@
 use jrsonnet_rowan_parser::{
 	AstNode, SyntaxKind, SyntaxNode, SyntaxToken,
 	nodes::{
-		Bind, CompSpec, Destruct, DestructRest, ExprArrayComp, ExprVar, MemberComp,
+		Bind, BindDestruct, CompSpec, Destruct, DestructRest, ExprArrayComp, ExprVar, MemberComp,
 		Name, ObjBodyComp, ObjBodyMemberList, ParamsDesc,
 	},
 	rowan::TextRange,
@@ -241,6 +241,23 @@ pub fn references(root: &SyntaxNode, target: &Decl) -> Vec<TextRange> {
 		.filter(|(_, r)| matches!(r, Resolution::Local(d) if d == target))
 		.map(|(n, _)| n.range)
 		.collect()
+}
+
+/// The expression a plain `local x = <expr>` name is bound to. Function binds, parameters,
+/// comprehension variables and names inside a destructuring pattern have no single value.
+pub fn decl_value(root: &SyntaxNode, decl: &Decl) -> Option<SyntaxNode> {
+	let tok = root
+		.token_at_offset(decl.range.start())
+		.find(|t| t.text_range() == decl.range)?;
+	let full = tok.parent()?.parent()?;
+	if full.kind() != SyntaxKind::DESTRUCT_FULL {
+		return None;
+	}
+	let bind = BindDestruct::cast(full.parent()?)?;
+	if BindDestruct::into(&bind)?.syntax() != &full {
+		return None;
+	}
+	Some(bind.value()?.syntax().clone())
 }
 
 pub fn is_valid_ident(s: &str) -> bool {

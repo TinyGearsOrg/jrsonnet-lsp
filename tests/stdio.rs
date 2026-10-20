@@ -213,3 +213,68 @@ fn imports() {
 
 	c.finish();
 }
+
+#[test]
+fn field_navigation_and_completion() {
+	let ws = std::path::Path::new(env!("CARGO_TARGET_TMPDIR")).join("fields-ws");
+	let _ = std::fs::remove_dir_all(&ws);
+	std::fs::create_dir_all(&ws).unwrap();
+	// `lib.libsonnet` has a local in front of the object, and a nested object.
+	std::fs::write(
+		ws.join("lib.libsonnet"),
+		"local h = 1;\n{\n  alpha: h,\n  nested: { deep: 1 },\n  method(x):: x,\n  'quoted-key': 2,\n  [\"dyn\" + \"amic\"]: 3,\n}\n",
+	)
+	.unwrap();
+	let uri_of = |rel: &str| format!("file://{}", ws.join(rel).display());
+
+	let mut c = Client::start();
+	c.send(json!({"jsonrpc":"2.0","id":0,"method":"initialize","params":{
+		"capabilities":{}, "workspaceFolders":[{"uri":uri_of(""),"name":"ws"}]}}));
+	c.recv();
+	c.send(json!({"jsonrpc":"2.0","method":"initialized","params":{}}));
+
+	let main = uri_of("main.jsonnet");
+	let src = "local lib = import 'lib.libsonnet';\nlocal obj = ({ own: 1 } + lib);\n[lib.alpha, lib.nested.deep, obj.own, obj.alpha, lib.method, lib.]";
+	let diags = c.open(&main, src);
+	// Only the trailing `lib.` is a syntax error.
+	assert!(!diags.as_array().unwrap().is_empty());
+
+	let at = |line, character| json!({"textDocument":{"uri":main},"position":{"line":line,"character":character}});
+	let def = |c: &mut Client, id, line, character| {
+		let r = c.request(id, "textDocument/definition", at(line, character));
+		r["result"].clone()
+	};
+
+	// `lib.alpha` in main (line 2) goes to `alpha`, declared on line 2 of lib.
+	let d = def(&mut c, 1, 2, 6);
+	assert_eq!(d["uri"], uri_of("lib.libsonnet"));
+	assert_eq!(d["range"]["start"], json!({"line":2,"character":2}));
+
+	// Chained: `lib.nested.deep` -> the `deep` in the nested object.
+	let d = def(&mut c, 2, 2, 25);
+	assert_eq!(d["uri"], uri_of("lib.libsonnet"));
+	assert_eq!(d["range"]["start"], json!({"line":3,"character":12}));
+
+	// Through `+` and parentheses: own field stays local, the rest comes from lib.
+	let d = def(&mut c, 3, 2, 34);
+	assert_eq!(d["uri"], main);
+	let d = def(&mut c, 4, 2, 43);
+	assert_eq!(d["uri"], uri_of("lib.libsonnet"));
+
+	// Methods are found, too.
+	let d = def(&mut c, 5, 2, 57);
+	assert_eq!(d["range"]["start"], json!({"line":4,"character":2}));
+
+	// Completion after the dangling `lib.`: fixed names only, computed `dyn...` skipped.
+	let items = c.request(6, "textDocument/completion", at(2, 65));
+	let mut labels: Vec<_> = items["result"]
+		.as_array()
+		.unwrap()
+		.iter()
+		.map(|i| i["label"].as_str().unwrap().to_owned())
+		.collect();
+	labels.sort();
+	assert_eq!(labels, ["alpha", "method", "nested", "quoted-key"]);
+
+	c.finish();
+}

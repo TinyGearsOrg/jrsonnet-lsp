@@ -31,7 +31,7 @@ pub fn imports(root: &SyntaxNode) -> Vec<Import> {
 }
 
 /// Value of a string literal. Block strings and malformed literals give `None`.
-fn string_value(kind: SyntaxKind, lit: &str) -> Option<String> {
+pub fn string_value(kind: SyntaxKind, lit: &str) -> Option<String> {
 	match kind {
 		SyntaxKind::STRING_DOUBLE | SyntaxKind::STRING_SINGLE => {
 			let inner = lit.get(1..lit.len().checked_sub(1)?)?;
