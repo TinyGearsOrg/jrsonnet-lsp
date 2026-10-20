@@ -89,3 +89,7 @@ jrsonnet's own `std` provides, including its additions to the standard library.
 Developed and tested on Linux. Windows drive-letter URIs (`file:///c%3A/...` as VS Code sends
 them, or `file:///C:/...`) and path comparison are handled and unit-tested, but the server has not
 been run on Windows. UNC paths (`file://server/share/...`) are not supported.
+
+## License
+
+MIT, see [LICENSE](LICENSE), the same license as jrsonnet, which this builds on.

@@ -114,3 +114,7 @@ npx vsce package --no-dependencies --target darwin-arm64
 ```
 
 CI does this per platform; see `.github/workflows/release.yml`.
+
+## License
+
+MIT, see [LICENSE](LICENSE).
