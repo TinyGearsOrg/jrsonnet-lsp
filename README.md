@@ -1,4 +1,17 @@
-# jrsonnet-lsp
+<p align="center"><img src="extension/images/icon.png" width="128" alt="jrsonnet-lsp icon: a gear between curly braces"></p>
+
+<h1 align="center">jrsonnet-lsp</h1>
+
+<p align="center"><b>A language server for Jsonnet</b><br>
+built on jrsonnet's parser and formatter, with a VS Code extension that bundles it</p>
+
+<p align="center">
+  <a href="https://github.com/TinyGearsOrg/jrsonnet-lsp/actions/workflows/ci.yml"><img src="https://github.com/TinyGearsOrg/jrsonnet-lsp/actions/workflows/ci.yml/badge.svg?branch=main" alt="CI"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue" alt="License: MIT"></a>
+  <img src="https://img.shields.io/badge/Rust-stable-orange" alt="Rust: stable">
+  <img src="https://img.shields.io/badge/VS%20Code-1.91%2B-blue" alt="VS Code 1.91+">
+  <a href="https://github.com/deltarocks/jrsonnet"><img src="https://img.shields.io/badge/built%20on-jrsonnet-8a5cf5" alt="Built on jrsonnet"></a>
+</p>
 
 A language server for [Jsonnet](https://jsonnet.org), built on the CST parser and
 formatter from [jrsonnet](https://github.com/deltarocks/jrsonnet), so it can follow

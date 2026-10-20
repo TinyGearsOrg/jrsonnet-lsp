@@ -1,6 +1,8 @@
 // Draws the extension icon: a gear (for the TinyGears publisher) between curly braces (for
 // Jsonnet's JSON heritage). Writes images/icon.svg, the editable source, and images/icon.png,
-// which is what VS Code and the Marketplace use (they don't accept SVG icons).
+// which is what VS Code and the Marketplace use (they don't accept SVG icons). It also writes
+// .github/social-preview.png (1280x640), the image to upload as the repository's social preview
+// in the GitHub settings; GitHub has no API for that.
 //
 //   npm run icon
 //
@@ -78,6 +80,28 @@ writeFileSync(join(root, 'images', 'icon.svg'), svg);
 const png = new Resvg(svg, { fitTo: { mode: 'width', value: SIZE } }).render().asPng();
 writeFileSync(join(root, 'images', 'icon.png'), png);
 console.log(`wrote images/icon.svg and images/icon.png (${SIZE}x${SIZE}, ${png.length} bytes)`);
+
+// The social preview: the icon, centered on a canvas in the icon's colors.
+const WIDTH = 1280;
+const HEIGHT = 640;
+const ICON = 400;
+const iconInner = svg.replace(/^<svg[^>]*>/, '').replace(/<\/svg>\s*$/, '');
+const social = `<svg xmlns="http://www.w3.org/2000/svg" width="${WIDTH}" height="${HEIGHT}" viewBox="0 0 ${WIDTH} ${HEIGHT}">
+  <defs>
+    <linearGradient id="social-bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#101728"/>
+      <stop offset="1" stop-color="#05070d"/>
+    </linearGradient>
+  </defs>
+  <rect width="${WIDTH}" height="${HEIGHT}" fill="url(#social-bg)"/>
+  <svg x="${(WIDTH - ICON) / 2}" y="${(HEIGHT - ICON) / 2}" width="${ICON}" height="${ICON}" viewBox="0 0 ${SIZE} ${SIZE}">${iconInner}</svg>
+</svg>
+`;
+const githubDir = join(root, '..', '.github');
+mkdirSync(githubDir, { recursive: true });
+const socialPng = new Resvg(social, { fitTo: { mode: 'width', value: WIDTH } }).render().asPng();
+writeFileSync(join(githubDir, 'social-preview.png'), socialPng);
+console.log(`wrote .github/social-preview.png (${WIDTH}x${HEIGHT}, ${socialPng.length} bytes)`);
 
 // Small previews, to check legibility at the sizes it is shown at; not part of the package.
 if (process.argv.includes('--previews')) {
