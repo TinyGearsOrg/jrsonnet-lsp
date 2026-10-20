@@ -45,6 +45,8 @@ pub fn run() -> Result<()> {
 		docs: HashMap::new(),
 	}
 	.main_loop()?;
+	// The writer thread exits only once the sender side is dropped.
+	drop(connection);
 	io_threads.join()?;
 	Ok(())
 }
