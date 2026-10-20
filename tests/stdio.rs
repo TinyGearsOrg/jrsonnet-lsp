@@ -975,5 +975,10 @@ fn demo_workspace() {
 			.unwrap()
 			.contains("greet")
 	);
+
+	// The highlighting sample is valid Jsonnet with every name defined, so it shows no problems.
+	let sample = std::fs::read_to_string(demo.join("highlighting.jsonnet")).unwrap();
+	let diags = c.open(&uri_of("highlighting.jsonnet"), &sample);
+	assert!(diags.as_array().unwrap().is_empty(), "{diags}");
 	c.finish();
 }

@@ -1,0 +1,51 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  server:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      # rust-toolchain.toml selects the latest stable.
+      - run: rustup toolchain install stable --profile minimal --component rustfmt --component clippy
+      - uses: Swatinem/rust-cache@v2
+      - run: make init
+      - run: make lint
+      - run: make test-server
+
+  extension:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: rustup toolchain install stable --profile minimal
+      - uses: Swatinem/rust-cache@v2
+      - run: make init
+      - run: make test-extension
+      # The integration tests start a real VS Code under a virtual display.
+      - uses: actions/cache@v4
+        with:
+          path: editors/vscode/.vscode-test
+          key: vscode-${{ runner.os }}-1.140.0
+      - run: make build-server
+      - run: xvfb-run -a make test-integration
+        env:
+          VSCODE_VERSION: 1.140.0
+      # Packaging has to keep working too.
+      - run: make package
+      - uses: actions/upload-artifact@v4
+        with:
+          name: vsix-linux-x64
+          path: editors/vscode/*.vsix

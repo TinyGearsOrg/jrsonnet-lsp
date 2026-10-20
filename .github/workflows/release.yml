@@ -1,0 +1,79 @@
+name: Release
+
+# Push a tag like v0.1.0 (matching the version in editors/vscode/package.json) to build one
+# platform-specific VSIX per target and attach them to a GitHub release. They are also published
+# to the Marketplace when the VSCE_PAT secret is set.
+
+on:
+  push:
+    tags: ['v*']
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { target: linux-x64, os: ubuntu-latest, rust: x86_64-unknown-linux-gnu }
+          # More platforms are one line each. They need nothing else, but are untested:
+          #   - { target: linux-arm64, os: ubuntu-24.04-arm, rust: aarch64-unknown-linux-gnu }
+          #   - { target: darwin-arm64, os: macos-latest, rust: aarch64-apple-darwin }
+          #   - { target: darwin-x64, os: macos-13, rust: x86_64-apple-darwin }
+          #   - { target: win32-x64, os: windows-latest, rust: x86_64-pc-windows-msvc }
+          # `target` is the VS Code target name (what `vsce package --target` takes).
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: The tag matches the extension's version
+        run: test "v$(node -p "require('./editors/vscode/package.json').version")" = "$GITHUB_REF_NAME"
+      - run: rustup toolchain install stable --profile minimal --target ${{ matrix.rust }}
+      - uses: Swatinem/rust-cache@v2
+      - run: make init
+      - run: cargo build --release --target ${{ matrix.rust }}
+      - name: Bundle the server and package the extension
+        working-directory: editors/vscode
+        run: |
+          exe=jsonnet-lsp
+          if [ "${{ matrix.target }}" = win32-x64 ]; then exe=jsonnet-lsp.exe; fi
+          node scripts/bundle-server.mjs --platform ${{ matrix.target }} --binary ../../target/${{ matrix.rust }}/release/$exe
+          npx vsce package --no-dependencies --target ${{ matrix.target }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: vsix-${{ matrix.target }}
+          path: editors/vscode/*.vsix
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      VSCE_PAT: ${{ secrets.VSCE_PAT }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: vsix-*
+          path: dist
+          merge-multiple: true
+      - run: gh release create "$GITHUB_REF_NAME" dist/*.vsix --generate-notes
+        env:
+          GH_TOKEN: ${{ github.token }}
+      - name: Publish to the Marketplace
+        if: ${{ env.VSCE_PAT != '' }}
+        working-directory: editors/vscode
+        run: |
+          npm ci
+          npx vsce publish --packagePath ../../dist/*.vsix

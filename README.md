@@ -2,9 +2,10 @@
 
 A language server for [Jsonnet](https://jsonnet.org), built on the CST parser and
 formatter from [jrsonnet](https://github.com/deltarocks/jrsonnet), so it can follow
-jrsonnet's language extensions.
+jrsonnet's language extensions. It talks LSP over stdio.
 
-Early work in progress. It talks LSP over stdio: `cargo run`.
+Early work in progress. A VS Code extension that bundles the server lives in
+[`editors/vscode`](editors/vscode); its README has setup and a manual test checklist.
 
 ## Supported
 
@@ -44,31 +45,36 @@ warning, since the real run may use different `-J` paths.
 
 ## Building
 
-The server needs `SyntaxError` exported from `jrsonnet-rowan-parser`, which the pinned jrsonnet
-rev doesn't do yet. `patches/export-syntax-error.patch` adds the export, and
-`.cargo/config.toml` points the jrsonnet crates at a patched checkout in `.jrsonnet/`. Cargo
-can't create that before resolving dependencies, so run the setup script first:
+`rust-toolchain.toml` selects the latest stable Rust (rustup installs it on first use). The
+server needs `SyntaxError` exported from `jrsonnet-rowan-parser`, which the pinned jrsonnet rev
+doesn't do yet. `patches/export-syntax-error.patch` adds the export, and `.cargo/config.toml`
+points the jrsonnet crates at a patched checkout in `.jrsonnet/`. Cargo can't create that before
+resolving dependencies, so set up a fresh checkout first:
 
 ```sh
-./scripts/setup-jrsonnet.sh   # fetches jrsonnet at the pinned rev and applies patches/
-cargo build
+make init     # fetches jrsonnet at the pinned rev, applies patches/, installs the extension's npm packages
+make build    # server (release) and extension
+make test     # server tests and extension unit tests
 ```
 
-Run the script again after bumping the rev in `Cargo.toml` or changing a patch; it does nothing
-when `.jrsonnet/` is already current. Set `JRSONNET_URL` to fetch from a mirror or a fork. Once the
-export is released upstream, bump the rev and delete the script, `patches/` and
+`make` lists every target (`lint`, `fmt`, `package`, `test-integration`, ...). Without the
+extension, `./scripts/setup-jrsonnet.sh && cargo build` is enough.
+
+Run the setup script again after bumping the rev in `Cargo.toml` or changing a patch; it does
+nothing when `.jrsonnet/` is already current. Set `JRSONNET_URL` to fetch from a mirror or a fork.
+Once the export is released upstream, bump the rev and delete the script, `patches/` and
 `.cargo/config.toml`.
 
 ## Development
 
-`cargo test` runs unit tests plus end-to-end tests that drive the binary over stdio.
+`cargo test` (or `make test-server`) runs unit tests plus end-to-end tests that drive the binary
+over stdio. `make test-integration` starts a real VS Code and tests the extension through its API.
 
 `cargo run --example dump -- '<jsonnet>'` prints the CST for a snippet, which is handy since the
 parser's tree doesn't always match `jsonnet.ungram`.
 
-`./scripts/gen-stdlib.sh` regenerates the `std` table in `src/stdlib/table.rs` from jrsonnet's own
+`make gen-stdlib` regenerates the `std` table in `src/stdlib/table.rs` from jrsonnet's own
 evaluator. Rerun it after bumping the jrsonnet rev.
-
 
 ## jrsonnet extensions
 

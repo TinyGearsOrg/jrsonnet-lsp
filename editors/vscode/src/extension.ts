@@ -44,7 +44,8 @@ async function start(context: vscode.ExtensionContext): Promise<void> {
     {
       configured: config.get<string>('server.path', ''),
       extensionPath: context.extensionPath,
-      development: context.extensionMode === vscode.ExtensionMode.Development,
+      // Running from source (F5 or the integration tests): prefer a fresh `cargo build`.
+      development: context.extensionMode !== vscode.ExtensionMode.Production,
       platform: process.platform,
       arch: process.arch,
       home: os.homedir(),

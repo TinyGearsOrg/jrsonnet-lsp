@@ -5,7 +5,7 @@ EXT := editors/vscode
 
 .DEFAULT_GOAL := help
 .PHONY: help init build build-server build-extension test test-server test-extension \
-	lint fmt gen-stdlib bundle package clean
+	test-integration lint fmt gen-stdlib bundle package clean
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*## ' $(MAKEFILE_LIST) | while IFS= read -r line; do \
@@ -31,6 +31,9 @@ test-server: ## Run the server's unit and end-to-end tests
 
 test-extension: ## Type-check the extension and run its tests
 	cd $(EXT) && npm run typecheck && npm test
+
+test-integration: build-server build-extension ## Run the extension in a real VS Code (downloads VS Code; needs a display, e.g. xvfb-run)
+	cd $(EXT) && npm run test:integration
 
 lint: ## Check formatting and run clippy, treating warnings as errors
 	cargo fmt --check
