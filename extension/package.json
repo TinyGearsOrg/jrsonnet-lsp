@@ -3,7 +3,7 @@
   "displayName": "Jsonnet (jrsonnet-lsp)",
   "description": "Jsonnet language support powered by a language server built on jrsonnet",
   "version": "0.0.1",
-  "publisher": "tinygearsorg",
+  "publisher": "TinyGears",
   "license": "MIT",
   "repository": {
     "type": "git",

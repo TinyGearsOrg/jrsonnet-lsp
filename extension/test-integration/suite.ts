@@ -43,7 +43,7 @@ export async function run(): Promise<void> {
   const mainUri = vscode.Uri.joinPath(folder.uri, 'main.jsonnet');
   const utilUri = vscode.Uri.joinPath(folder.uri, 'lib', 'util.libsonnet');
 
-  const extension = vscode.extensions.getExtension('tinygearsorg.jrsonnet-lsp');
+  const extension = vscode.extensions.getExtension('TinyGears.jrsonnet-lsp');
   assert.ok(extension, 'the extension is installed');
   await extension.activate();
 
