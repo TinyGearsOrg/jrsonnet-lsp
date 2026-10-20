@@ -9,7 +9,7 @@ use jrsonnet_rowan_parser::{
 		Bind, BindDestruct, CompSpec, Destruct, DestructRest, ExprArrayComp, ExprVar, MemberComp,
 		Name, ObjBodyComp, ObjBodyMemberList, ParamsDesc,
 	},
-	rowan::TextRange,
+	rowan::{NodeOrToken, TextRange, TextSize},
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -258,6 +258,24 @@ pub fn decl_value(root: &SyntaxNode, decl: &Decl) -> Option<SyntaxNode> {
 		return None;
 	}
 	Some(bind.value()?.syntax().clone())
+}
+
+/// Names usable at `offset`, innermost declarations first, each name once.
+pub fn visible_at(root: &SyntaxNode, offset: TextSize) -> Vec<Decl> {
+	let at = TextRange::empty(offset);
+	let start = match root.covering_element(at) {
+		NodeOrToken::Node(n) => Some(n),
+		NodeOrToken::Token(t) => t.parent(),
+	};
+	let mut out: Vec<Decl> = vec![];
+	for anc in start.into_iter().flat_map(|n| n.ancestors()) {
+		for d in introduced(&anc, Some(at)).into_iter().rev() {
+			if !out.iter().any(|o| o.name == d.name) {
+				out.push(d);
+			}
+		}
+	}
+	out
 }
 
 pub fn is_valid_ident(s: &str) -> bool {

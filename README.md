@@ -18,6 +18,8 @@ Early work in progress. It talks LSP over stdio: `cargo run`.
 - Go to definition of `x.field` and completion after `.`, following object literals, `+`,
   parentheses, `local` names, `import`s and chained fields across files (static, best effort:
   no calls, conditionals, `self`/`super` or `std`)
+- `std.` completion (names taken from jrsonnet's own `std` at the pinned rev), completion of
+  variables in scope, and a document outline of top-level locals and object fields
 
 ## Import search paths
 
@@ -30,7 +32,6 @@ warning, since the real run may use different `-J` paths.
 ## Planned
 
 XX
-- Document symbols, `std.*` completion and hover
 
 ## Development
 

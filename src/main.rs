@@ -3,6 +3,8 @@ mod document;
 mod fields;
 mod imports;
 mod scope;
+mod stdlib;
+mod symbols;
 mod uri;
 mod server;
 

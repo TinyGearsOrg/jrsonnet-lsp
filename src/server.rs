@@ -14,6 +14,7 @@ use lsp_server::{Connection, ErrorCode, Message, Notification, Request, Response
 use lsp_types::{
 	Diagnostic, DiagnosticSeverity, DidChangeTextDocumentParams, DidCloseTextDocumentParams,
 	CompletionItem, CompletionItemKind, CompletionOptions, CompletionParams, CompletionResponse,
+	DocumentSymbolParams, DocumentSymbolResponse,
 	DocumentLink, DocumentLinkOptions, DocumentLinkParams,
 	DidOpenTextDocumentParams, DocumentFormattingParams, GotoDefinitionParams,
 	GotoDefinitionResponse, InitializeParams, Location, OneOf, Position, PrepareRenameResponse,
@@ -25,7 +26,7 @@ use lsp_types::{
 		PublishDiagnostics,
 	},
 	request::{
-		Completion, DocumentLinkRequest, Formatting, GotoDefinition, PrepareRenameRequest, References, Rename,
+		Completion, DocumentLinkRequest, DocumentSymbolRequest, Formatting, GotoDefinition, PrepareRenameRequest, References, Rename,
 		Request as _,
 	},
 };
@@ -35,6 +36,7 @@ use crate::{
 	fields::{self, Fields, Files},
 	imports,
 	scope::{self, Resolution},
+	stdlib, symbols,
 	uri,
 };
 
@@ -49,6 +51,7 @@ pub fn run() -> Result<()> {
 			prepare_provider: Some(true),
 			work_done_progress_options: Default::default(),
 		})),
+		document_symbol_provider: Some(OneOf::Left(true)),
 		completion_provider: Some(CompletionOptions {
 			trigger_characters: Some(vec![".".to_owned()]),
 			..Default::default()
@@ -190,6 +193,7 @@ impl Server<'_> {
 			Rename::METHOD => self.rename(&params(&req)?).and_then(json),
 			DocumentLinkRequest::METHOD => json(self.document_links(&params(&req)?)),
 			Completion::METHOD => json(self.completion(&params(&req)?)),
+			DocumentSymbolRequest::METHOD => json(self.document_symbols(&params(&req)?)),
 			m => Err((ErrorCode::MethodNotFound, format!("unsupported request {m}"))),
 		}
 	}
@@ -302,16 +306,38 @@ impl Server<'_> {
 	fn completion(&self, params: &CompletionParams) -> Option<CompletionResponse> {
 		let pos = &params.text_document_position;
 		let doc = self.docs.get(&pos.text_document.uri)?;
-		let items = self
-			.fields_at(doc, pos.position)?
-			.into_iter()
-			.map(|f| CompletionItem {
-				label: f.name,
-				kind: Some(CompletionItemKind::FIELD),
-				..Default::default()
-			})
-			.collect();
+		let item = |label: &str, kind| CompletionItem {
+			label: label.to_owned(),
+			kind: Some(kind),
+			..Default::default()
+		};
+		let items = if let Some(suffix) = Self::suffix_index_at(doc, pos.position) {
+			// After a `.`: fields of the object on the left, or the standard library.
+			if is_std_receiver(&suffix) {
+				stdlib::NAMES
+					.iter()
+					.map(|n| item(n, CompletionItemKind::FUNCTION))
+					.collect()
+			} else {
+				fields::before_suffix(&self.loader(), doc, &suffix)?
+					.iter()
+					.map(|f| item(&f.name, CompletionItemKind::FIELD))
+					.collect()
+			}
+		} else {
+			let offset = doc.offset(pos.position)?;
+			scope::visible_at(&doc.root, offset.into())
+				.iter()
+				.map(|d| item(&d.name, CompletionItemKind::VARIABLE))
+				.chain([item("std", CompletionItemKind::MODULE)])
+				.collect()
+		};
 		Some(CompletionResponse::Array(items))
+	}
+
+	fn document_symbols(&self, params: &DocumentSymbolParams) -> Option<DocumentSymbolResponse> {
+		let doc = self.docs.get(&params.text_document.uri)?;
+		Some(DocumentSymbolResponse::Nested(symbols::symbols(doc)))
 	}
 
 	/// Go to the declaration of the field named by the identifier under the cursor in `x.name`.
@@ -435,4 +461,18 @@ fn diagnostics(doc: &Document, resolve_import: impl Fn(&str) -> Option<PathBuf>)
 			..Default::default()
 		});
 	syntax.chain(unresolved).chain(missing_imports).collect()
+}
+
+/// Whether `suffix` is the first `.name` on the bare identifier `std`.
+fn is_std_receiver(suffix: &jrsonnet_rowan_parser::SyntaxNode) -> bool {
+	use jrsonnet_rowan_parser::{AstNode as _, nodes::ExprVar};
+	let Some(expr) = suffix.parent() else { return false };
+	let mut parts = expr
+		.children()
+		.filter(|c| !matches!(c.kind(), SyntaxKind::STMT_LOCAL | SyntaxKind::STMT_ASSERT));
+	let (Some(base), Some(first_suffix)) = (parts.next(), parts.next()) else {
+		return false;
+	};
+	&first_suffix == suffix
+		&& ExprVar::cast(base).and_then(|v| scope::resolve(&v)) == Some(Resolution::Std)
 }

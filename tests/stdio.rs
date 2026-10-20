@@ -278,3 +278,53 @@ fn field_navigation_and_completion() {
 
 	c.finish();
 }
+
+#[test]
+fn symbols_and_scope_completion() {
+	let mut c = Client::start();
+	c.initialize();
+
+	let uri = "file:///sym.jsonnet";
+	c.open(uri, "local a = 1;\nlocal f(x) = x;\n{\n  top: 1,\n  nested: { inner: 2 },\n  m(y):: y,\n}\n");
+	let syms = c.request(1, "textDocument/documentSymbol", json!({"textDocument":{"uri":uri}}));
+	let syms = syms["result"].as_array().unwrap();
+	let names: Vec<_> = syms.iter().map(|s| (s["name"].as_str().unwrap(), s["kind"].as_i64().unwrap())).collect();
+	// LSP kinds: 13 variable, 12 function, 8 field, 19 object, 6 method.
+	assert_eq!(names, [("a", 13), ("f", 12), ("top", 8), ("nested", 19), ("m", 6)]);
+	assert_eq!(syms[3]["children"][0]["name"], "inner");
+	assert_eq!(syms[3]["children"][0]["range"]["start"]["line"], 4);
+
+	let labels = |r: &Value| -> Vec<String> {
+		let mut v: Vec<_> = r["result"].as_array().unwrap().iter().map(|i| i["label"].as_str().unwrap().to_owned()).collect();
+		v.sort();
+		v
+	};
+	let at = |uri: &str, line, character| json!({"textDocument":{"uri":uri},"position":{"line":line,"character":character}});
+
+	// `std.` lists the standard library.
+	let u2 = "file:///std.jsonnet";
+	c.open(u2, "std.");
+	let r = c.request(2, "textDocument/completion", at(u2, 0, 4));
+	let l = labels(&r);
+	assert!(l.contains(&"length".to_owned()) && l.contains(&"manifestJson".to_owned()));
+	assert!(!l.iter().any(|n| n.starts_with("__")));
+
+	// A local named `std` is not the standard library.
+	let u3 = "file:///shadow.jsonnet";
+	c.open(u3, "local std = { mine: 1 }; std.");
+	let r = c.request(3, "textDocument/completion", at(u3, 0, 29));
+	assert_eq!(labels(&r), ["mine"]);
+
+	// Plain completion offers names in scope at the cursor (a `local` ends at the comma after its
+	// body; a comprehension variable is visible in its head, not in its own iterable), no others.
+	let u4 = "file:///scope.jsonnet";
+	c.open(u4, "local outer = 1;\n[local inner = 2; inner, [x for loopvar in [1]], \n]");
+	let r = c.request(4, "textDocument/completion", at(u4, 1, 22));
+	assert_eq!(labels(&r), ["inner", "outer", "std"]);
+	let r = c.request(5, "textDocument/completion", at(u4, 1, 27));
+	assert_eq!(labels(&r), ["loopvar", "outer", "std"]);
+	let r = c.request(6, "textDocument/completion", at(u4, 2, 0));
+	assert_eq!(labels(&r), ["outer", "std"]);
+
+	c.finish();
+}
