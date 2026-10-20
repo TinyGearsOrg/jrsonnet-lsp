@@ -61,7 +61,10 @@ fn diagnostics_and_formatting() {
 
 	c.send(json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{}}}));
 	let init = c.recv();
-	assert_eq!(init["result"]["capabilities"]["documentFormattingProvider"], true);
+	assert_eq!(
+		init["result"]["capabilities"]["documentFormattingProvider"],
+		true
+	);
 	c.send(json!({"jsonrpc":"2.0","method":"initialized","params":{}}));
 
 	let open = |text: &str, ver: i64, method: &str| {
@@ -80,18 +83,36 @@ fn diagnostics_and_formatting() {
 	c.send(open("{a:1,\n b:[1,2}", 1, "textDocument/didOpen"));
 	let diags = c.recv();
 	assert_eq!(diags["method"], "textDocument/publishDiagnostics");
-	assert!(!diags["params"]["diagnostics"].as_array().unwrap().is_empty());
-	assert_eq!(diags["params"]["diagnostics"][0]["range"]["start"]["line"], 1);
+	assert!(
+		!diags["params"]["diagnostics"]
+			.as_array()
+			.unwrap()
+			.is_empty()
+	);
+	assert_eq!(
+		diags["params"]["diagnostics"][0]["range"]["start"]["line"],
+		1
+	);
 
 	c.send(open("{a:1,b:  [1,2]}", 2, "textDocument/didChange"));
 	let diags = c.recv();
-	assert!(diags["params"]["diagnostics"].as_array().unwrap().is_empty());
+	assert!(
+		diags["params"]["diagnostics"]
+			.as_array()
+			.unwrap()
+			.is_empty()
+	);
 
-	c.send(json!({"jsonrpc":"2.0","id":2,"method":"textDocument/formatting",
-		"params":{"textDocument":{"uri":uri},"options":{"tabSize":2,"insertSpaces":true}}}));
+	c.send(
+		json!({"jsonrpc":"2.0","id":2,"method":"textDocument/formatting",
+		"params":{"textDocument":{"uri":uri},"options":{"tabSize":2,"insertSpaces":true}}}),
+	);
 	let edits = c.recv();
 	let new_text = edits["result"][0]["newText"].as_str().unwrap();
-	assert!(new_text.contains("a: 1"), "unexpected formatting: {new_text}");
+	assert!(
+		new_text.contains("a: 1"),
+		"unexpected formatting: {new_text}"
+	);
 
 	c.send(json!({"jsonrpc":"2.0","id":3,"method":"shutdown"}));
 	c.recv();
@@ -103,15 +124,19 @@ fn diagnostics_and_formatting() {
 
 impl Client {
 	fn initialize(&mut self) {
-		self.send(json!({"jsonrpc":"2.0","id":0,"method":"initialize","params":{"capabilities":{}}}));
+		self.send(
+			json!({"jsonrpc":"2.0","id":0,"method":"initialize","params":{"capabilities":{}}}),
+		);
 		self.recv();
 		self.send(json!({"jsonrpc":"2.0","method":"initialized","params":{}}));
 	}
 
 	/// Opens a document and returns its published diagnostics.
 	fn open(&mut self, uri: &str, text: &str) -> Value {
-		self.send(json!({"jsonrpc":"2.0","method":"textDocument/didOpen","params":{
-			"textDocument":{"uri":uri,"languageId":"jsonnet","version":1,"text":text}}}));
+		self.send(
+			json!({"jsonrpc":"2.0","method":"textDocument/didOpen","params":{
+			"textDocument":{"uri":uri,"languageId":"jsonnet","version":1,"text":text}}}),
+		);
 		self.recv()["params"]["diagnostics"].clone()
 	}
 
@@ -137,7 +162,10 @@ fn navigation_and_rename() {
 	c.initialize();
 	let uri = "file:///t.jsonnet";
 	// The string has a 2-byte and a 4-byte char (1 and 2 UTF-16 units); columns must line up.
-	let diags = c.open(uri, "local s = \"é😀\"; local a = 1;\nlocal f(x) = x + a;\nf(a) + nope");
+	let diags = c.open(
+		uri,
+		"local s = \"é😀\"; local a = 1;\nlocal f(x) = x + a;\nf(a) + nope",
+	);
 	let diags = diags.as_array().unwrap();
 	assert_eq!(diags.len(), 1);
 	assert_eq!(diags[0]["message"], "undefined variable `nope`");
@@ -147,7 +175,10 @@ fn navigation_and_rename() {
 
 	// Definition from the use in `f(é)` goes to the `local a` declaration.
 	let def = c.request(1, "textDocument/definition", at(2, 2));
-	assert_eq!(def["result"]["range"]["start"], json!({"line":0,"character":23}));
+	assert_eq!(
+		def["result"]["range"]["start"],
+		json!({"line":0,"character":23})
+	);
 
 	let mut refs_params = at(0, 23);
 	refs_params["context"] = json!({"includeDeclaration": true});
@@ -166,7 +197,12 @@ fn navigation_and_rename() {
 
 	rename["newName"] = json!("local");
 	let err = c.request(6, "textDocument/rename", rename);
-	assert!(err["error"]["message"].as_str().unwrap().contains("not a valid identifier"));
+	assert!(
+		err["error"]["message"]
+			.as_str()
+			.unwrap()
+			.contains("not a valid identifier")
+	);
 
 	c.finish();
 }
@@ -175,7 +211,13 @@ fn navigation_and_rename() {
 fn imports() {
 	let ws = std::path::Path::new(env!("CARGO_TARGET_TMPDIR")).join("imports-ws");
 	let _ = std::fs::remove_dir_all(&ws);
-	for f in ["main.jsonnet", "sibling.libsonnet", "lib/in-lib.libsonnet", "vendor/in-vendor.libsonnet", "extra/in-jpath.libsonnet"] {
+	for f in [
+		"main.jsonnet",
+		"sibling.libsonnet",
+		"lib/in-lib.libsonnet",
+		"vendor/in-vendor.libsonnet",
+		"extra/in-jpath.libsonnet",
+	] {
 		let p = ws.join(f);
 		std::fs::create_dir_all(p.parent().unwrap()).unwrap();
 		std::fs::write(p, "{}").unwrap();
@@ -183,11 +225,13 @@ fn imports() {
 	let uri_of = |rel: &str| format!("file://{}", ws.join(rel).display());
 
 	let mut c = Client::start();
-	c.send(json!({"jsonrpc":"2.0","id":0,"method":"initialize","params":{
-		"capabilities":{},
-		"workspaceFolders":[{"uri":uri_of(""),"name":"ws"}],
-		"initializationOptions":{"jpath":["extra"]},
-	}}));
+	c.send(
+		json!({"jsonrpc":"2.0","id":0,"method":"initialize","params":{
+			"capabilities":{},
+			"workspaceFolders":[{"uri":uri_of(""),"name":"ws"}],
+			"initializationOptions":{"jpath":["extra"]},
+		}}),
+	);
 	c.recv();
 	c.send(json!({"jsonrpc":"2.0","method":"initialized","params":{}}));
 
@@ -197,19 +241,35 @@ fn imports() {
 	let diags = diags.as_array().unwrap();
 	assert_eq!(diags.len(), 1, "{diags:?}");
 	assert_eq!(diags[0]["severity"], 2);
-	assert!(diags[0]["message"].as_str().unwrap().contains("missing.libsonnet"));
+	assert!(
+		diags[0]["message"]
+			.as_str()
+			.unwrap()
+			.contains("missing.libsonnet")
+	);
 
-	let links = c.request(1, "textDocument/documentLink", json!({"textDocument":{"uri":main}}));
+	let links = c.request(
+		1,
+		"textDocument/documentLink",
+		json!({"textDocument":{"uri":main}}),
+	);
 	let links = links["result"].as_array().unwrap();
 	assert_eq!(links.len(), 4);
 	assert_eq!(links[0]["target"], uri_of("sibling.libsonnet"));
 	assert_eq!(links[2]["target"], uri_of("vendor/in-vendor.libsonnet"));
 
 	// Column 17 is inside the first path string.
-	let def = c.request(2, "textDocument/definition", json!({
-		"textDocument":{"uri":main},"position":{"line":0,"character":17}}));
+	let def = c.request(
+		2,
+		"textDocument/definition",
+		json!({
+		"textDocument":{"uri":main},"position":{"line":0,"character":17}}),
+	);
 	assert_eq!(def["result"]["uri"], uri_of("sibling.libsonnet"));
-	assert_eq!(def["result"]["range"]["start"], json!({"line":0,"character":0}));
+	assert_eq!(
+		def["result"]["range"]["start"],
+		json!({"line":0,"character":0})
+	);
 
 	c.finish();
 }
@@ -228,8 +288,10 @@ fn field_navigation_and_completion() {
 	let uri_of = |rel: &str| format!("file://{}", ws.join(rel).display());
 
 	let mut c = Client::start();
-	c.send(json!({"jsonrpc":"2.0","id":0,"method":"initialize","params":{
-		"capabilities":{}, "workspaceFolders":[{"uri":uri_of(""),"name":"ws"}]}}));
+	c.send(
+		json!({"jsonrpc":"2.0","id":0,"method":"initialize","params":{
+		"capabilities":{}, "workspaceFolders":[{"uri":uri_of(""),"name":"ws"}]}}),
+	);
 	c.recv();
 	c.send(json!({"jsonrpc":"2.0","method":"initialized","params":{}}));
 
@@ -285,17 +347,35 @@ fn symbols_and_scope_completion() {
 	c.initialize();
 
 	let uri = "file:///sym.jsonnet";
-	c.open(uri, "local a = 1;\nlocal f(x) = x;\n{\n  top: 1,\n  nested: { inner: 2 },\n  m(y):: y,\n}\n");
-	let syms = c.request(1, "textDocument/documentSymbol", json!({"textDocument":{"uri":uri}}));
+	c.open(
+		uri,
+		"local a = 1;\nlocal f(x) = x;\n{\n  top: 1,\n  nested: { inner: 2 },\n  m(y):: y,\n}\n",
+	);
+	let syms = c.request(
+		1,
+		"textDocument/documentSymbol",
+		json!({"textDocument":{"uri":uri}}),
+	);
 	let syms = syms["result"].as_array().unwrap();
-	let names: Vec<_> = syms.iter().map(|s| (s["name"].as_str().unwrap(), s["kind"].as_i64().unwrap())).collect();
+	let names: Vec<_> = syms
+		.iter()
+		.map(|s| (s["name"].as_str().unwrap(), s["kind"].as_i64().unwrap()))
+		.collect();
 	// LSP kinds: 13 variable, 12 function, 8 field, 19 object, 6 method.
-	assert_eq!(names, [("a", 13), ("f", 12), ("top", 8), ("nested", 19), ("m", 6)]);
+	assert_eq!(
+		names,
+		[("a", 13), ("f", 12), ("top", 8), ("nested", 19), ("m", 6)]
+	);
 	assert_eq!(syms[3]["children"][0]["name"], "inner");
 	assert_eq!(syms[3]["children"][0]["range"]["start"]["line"], 4);
 
 	let labels = |r: &Value| -> Vec<String> {
-		let mut v: Vec<_> = r["result"].as_array().unwrap().iter().map(|i| i["label"].as_str().unwrap().to_owned()).collect();
+		let mut v: Vec<_> = r["result"]
+			.as_array()
+			.unwrap()
+			.iter()
+			.map(|i| i["label"].as_str().unwrap().to_owned())
+			.collect();
 		v.sort();
 		v
 	};
@@ -318,7 +398,10 @@ fn symbols_and_scope_completion() {
 	// Plain completion offers names in scope at the cursor (a `local` ends at the comma after its
 	// body; a comprehension variable is visible in its head, not in its own iterable), no others.
 	let u4 = "file:///scope.jsonnet";
-	c.open(u4, "local outer = 1;\n[local inner = 2; inner, [x for loopvar in [1]], \n]");
+	c.open(
+		u4,
+		"local outer = 1;\n[local inner = 2; inner, [x for loopvar in [1]], \n]",
+	);
 	let r = c.request(4, "textDocument/completion", at(u4, 1, 22));
 	assert_eq!(labels(&r), ["inner", "outer", "std"]);
 	let r = c.request(5, "textDocument/completion", at(u4, 1, 27));
@@ -338,8 +421,12 @@ fn self_super_and_dollar() {
 	let mut id = 0;
 	let mut def = |line, character| {
 		id += 1;
-		let r = c.request(id, "textDocument/definition", json!({
-			"textDocument":{"uri":uri},"position":{"line":line,"character":character}}));
+		let r = c.request(
+			id,
+			"textDocument/definition",
+			json!({
+			"textDocument":{"uri":uri},"position":{"line":line,"character":character}}),
+		);
 		r["result"]["range"]["start"].clone()
 	};
 	// `self.a` inside the first object.
@@ -364,8 +451,12 @@ fn hover() {
 	let mut id = 0;
 	let mut hover = |line, character| {
 		id += 1;
-		let r = c.request(id, "textDocument/hover", json!({
-			"textDocument":{"uri":uri},"position":{"line":line,"character":character}}));
+		let r = c.request(
+			id,
+			"textDocument/hover",
+			json!({
+			"textDocument":{"uri":uri},"position":{"line":line,"character":character}}),
+		);
 		r["result"]["contents"]["value"].as_str().map(str::to_owned)
 	};
 	assert!(hover(2, 19).unwrap().contains("local f(a, b) = a + b"));
@@ -376,5 +467,54 @@ fn hover() {
 	assert!(hover(2, 35).unwrap().contains("standard library"));
 	// Undefined names have nothing to show.
 	assert_eq!(hover(2, 41), None);
+	c.finish();
+}
+
+#[test]
+fn import_diagnostics_refresh_on_file_changes() {
+	let ws = std::path::Path::new(env!("CARGO_TARGET_TMPDIR")).join("watch-ws");
+	let _ = std::fs::remove_dir_all(&ws);
+	std::fs::create_dir_all(&ws).unwrap();
+	let uri_of = |rel: &str| format!("file://{}", ws.join(rel).display());
+
+	let mut c = Client::start();
+	c.send(
+		json!({"jsonrpc":"2.0","id":0,"method":"initialize","params":{
+		"capabilities":{"workspace":{"didChangeWatchedFiles":{"dynamicRegistration":true}}},
+		"workspaceFolders":[{"uri":uri_of(""),"name":"ws"}]}}),
+	);
+	c.recv();
+	c.send(json!({"jsonrpc":"2.0","method":"initialized","params":{}}));
+
+	// The server asks to watch Jsonnet files.
+	let reg = c.recv();
+	assert_eq!(reg["method"], "client/registerCapability");
+	let registration = &reg["params"]["registrations"][0];
+	assert_eq!(registration["method"], "workspace/didChangeWatchedFiles");
+	assert_eq!(
+		registration["registerOptions"]["watchers"][0]["globPattern"],
+		"**/*.{jsonnet,libsonnet}"
+	);
+	c.send(json!({"jsonrpc":"2.0","id":reg["id"],"result":null}));
+
+	let main = uri_of("main.jsonnet");
+	let diags = c.open(&main, "import 'late.libsonnet'");
+	assert_eq!(diags.as_array().unwrap().len(), 1);
+
+	std::fs::write(ws.join("late.libsonnet"), "{}").unwrap();
+	c.send(
+		json!({"jsonrpc":"2.0","method":"workspace/didChangeWatchedFiles","params":{
+		"changes":[{"uri":uri_of("late.libsonnet"),"type":1}]}}),
+	);
+	let refreshed = c.recv();
+	assert_eq!(refreshed["method"], "textDocument/publishDiagnostics");
+	assert_eq!(refreshed["params"]["uri"], main);
+	assert!(
+		refreshed["params"]["diagnostics"]
+			.as_array()
+			.unwrap()
+			.is_empty()
+	);
+
 	c.finish();
 }

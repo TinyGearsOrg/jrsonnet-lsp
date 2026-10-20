@@ -135,7 +135,10 @@ fn introduced(node: &SyntaxNode, at: Option<TextRange>) -> Vec<Decl> {
 	let mut out = vec![];
 	match node.kind() {
 		SyntaxKind::EXPR => {
-			for stmt in node.children().filter(|c| c.kind() == SyntaxKind::STMT_LOCAL) {
+			for stmt in node
+				.children()
+				.filter(|c| c.kind() == SyntaxKind::STMT_LOCAL)
+			{
 				let r = stmt.text_range();
 				// Binds see themselves (recursion) and everything after them.
 				if at.is_some_and(|at| r.end() > at.start() && !r.contains_range(at)) {
@@ -208,15 +211,19 @@ pub fn resolve(var: &ExprVar) -> Option<Resolution> {
 
 /// All declarations in the file.
 pub fn declarations(root: &SyntaxNode) -> Vec<Decl> {
-	root.descendants().flat_map(|n| introduced(&n, None)).collect()
+	root.descendants()
+		.flat_map(|n| introduced(&n, None))
+		.collect()
 }
 
 /// All uses of names in the file, with what each resolves to.
 pub fn uses(root: &SyntaxNode) -> impl Iterator<Item = (Decl, Resolution)> + '_ {
-	root.descendants().filter_map(ExprVar::cast).filter_map(|v| {
-		let name = decl(&v.name()?)?;
-		Some((name, resolve(&v)?))
-	})
+	root.descendants()
+		.filter_map(ExprVar::cast)
+		.filter_map(|v| {
+			let name = decl(&v.name()?)?;
+			Some((name, resolve(&v)?))
+		})
 }
 
 /// The declaration the identifier under the cursor refers to or declares.
@@ -296,8 +303,24 @@ pub fn decl_site(root: &SyntaxNode, decl: &Decl) -> Option<(SyntaxNode, &'static
 
 pub fn is_valid_ident(s: &str) -> bool {
 	const KEYWORDS: &[&str] = &[
-		"assert", "else", "error", "false", "for", "function", "if", "import", "importstr",
-		"importbin", "in", "local", "null", "tailstrict", "then", "self", "super", "true",
+		"assert",
+		"else",
+		"error",
+		"false",
+		"for",
+		"function",
+		"if",
+		"import",
+		"importstr",
+		"importbin",
+		"in",
+		"local",
+		"null",
+		"tailstrict",
+		"then",
+		"self",
+		"super",
+		"true",
 	];
 	let mut chars = s.chars();
 	chars
@@ -334,7 +357,11 @@ mod tests {
 		let Some(Resolution::Local(got)) = decl_at(&root, &tok) else {
 			panic!("`{}` didn't resolve to a local in {clean}", tok.text())
 		};
-		assert_eq!(usize::from(got.range.start()), decl_at_.unwrap(), "in {clean}");
+		assert_eq!(
+			usize::from(got.range.start()),
+			decl_at_.unwrap(),
+			"in {clean}"
+		);
 	}
 
 	fn unresolved(src: &str) -> Vec<String> {

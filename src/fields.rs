@@ -10,11 +10,11 @@ use std::rc::Rc;
 
 use jrsonnet_rowan_parser::{
 	AstNode, AstToken, SyntaxKind, SyntaxNode,
-	nodes::{
-		Expr, ExprBinary, ExprImport, ExprObjExtend, ExprObject, ExprParened, ExprVar,
-		FieldName, Member, ObjBody, SuffixIndex,
-	},
 	nodes::ImportKindKind,
+	nodes::{
+		Expr, ExprBinary, ExprImport, ExprObjExtend, ExprObject, ExprParened, ExprVar, FieldName,
+		Member, ObjBody, SuffixIndex,
+	},
 	rowan::TextRange,
 };
 
@@ -77,7 +77,12 @@ pub fn before_suffix(files: &dyn Files, doc: &Rc<Document>, suffix: &SyntaxNode)
 	eval(files, doc, &suffix.parent()?, Some(suffix), 0)
 }
 
-fn base_fields(files: &dyn Files, doc: &Rc<Document>, node: &SyntaxNode, depth: u8) -> Option<Fields> {
+fn base_fields(
+	files: &dyn Files,
+	doc: &Rc<Document>,
+	node: &SyntaxNode,
+	depth: u8,
+) -> Option<Fields> {
 	let sub = |e: Option<Expr>| eval(files, doc, e?.syntax(), None, depth + 1);
 	match node.kind() {
 		SyntaxKind::EXPR_OBJECT => object_fields(doc, &ExprObject::cast(node.clone())?),
@@ -109,7 +114,10 @@ fn base_fields(files: &dyn Files, doc: &Rc<Document>, node: &SyntaxNode, depth: 
 			let text = import.text()?;
 			let path = imports::string_value(text.syntax().kind(), text.syntax().text())?;
 			let target = files.import(doc, &path)?;
-			let root = target.root.children().find(|c| c.kind() == SyntaxKind::EXPR)?;
+			let root = target
+				.root
+				.children()
+				.find(|c| c.kind() == SyntaxKind::EXPR)?;
 			eval(files, &target, &root, None, depth + 1)
 		}
 		SyntaxKind::EXPR_VAR => {
@@ -140,13 +148,20 @@ fn super_expr(obj: &SyntaxNode) -> Option<SyntaxNode> {
 			.any(|e| e.kind() == SyntaxKind::PLUS),
 		_ => false,
 	};
-	let mut exprs = container.children().filter(|c| c.kind() == SyntaxKind::EXPR);
+	let mut exprs = container
+		.children()
+		.filter(|c| c.kind() == SyntaxKind::EXPR);
 	let (lhs, rhs) = (exprs.next()?, exprs.next()?);
 	(combines && rhs == wrapper).then_some(lhs)
 }
 
 /// Fields of the object literal `obj` as seen by `self`: its own plus those it extends.
-fn self_fields(files: &dyn Files, doc: &Rc<Document>, obj: &SyntaxNode, depth: u8) -> Option<Fields> {
+fn self_fields(
+	files: &dyn Files,
+	doc: &Rc<Document>,
+	obj: &SyntaxNode,
+	depth: u8,
+) -> Option<Fields> {
 	let own = object_fields(doc, &ExprObject::cast(obj.clone())?)?;
 	let inherited = super_expr(obj)
 		.and_then(|lhs| eval(files, doc, &lhs, None, depth + 1))
@@ -155,8 +170,16 @@ fn self_fields(files: &dyn Files, doc: &Rc<Document>, obj: &SyntaxNode, depth: u
 }
 
 /// `self`, `super` and `$` in the object literals that enclose `node`.
-fn keyword_fields(files: &dyn Files, doc: &Rc<Document>, node: &SyntaxNode, kw: SyntaxKind, depth: u8) -> Option<Fields> {
-	let mut objects = node.ancestors().filter(|n| n.kind() == SyntaxKind::EXPR_OBJECT);
+fn keyword_fields(
+	files: &dyn Files,
+	doc: &Rc<Document>,
+	node: &SyntaxNode,
+	kw: SyntaxKind,
+	depth: u8,
+) -> Option<Fields> {
+	let mut objects = node
+		.ancestors()
+		.filter(|n| n.kind() == SyntaxKind::EXPR_OBJECT);
 	match kw {
 		SyntaxKind::SELF_KW => self_fields(files, doc, &objects.next()?, depth),
 		SyntaxKind::SUPER_KW => eval(files, doc, &super_expr(&objects.next()?)?, None, depth + 1),
@@ -225,7 +248,10 @@ impl Field {
 			.token_at_offset(self.name_range.start())
 			.find(|t| t.text_range() == self.name_range)?;
 		tok.parent_ancestors().find(|n| {
-			matches!(n.kind(), SyntaxKind::MEMBER_FIELD_NORMAL | SyntaxKind::MEMBER_FIELD_METHOD)
+			matches!(
+				n.kind(),
+				SyntaxKind::MEMBER_FIELD_NORMAL | SyntaxKind::MEMBER_FIELD_METHOD
+			)
 		})
 	}
 }

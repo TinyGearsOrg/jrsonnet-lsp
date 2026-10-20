@@ -27,7 +27,11 @@ impl LineIndex {
 	/// Byte offset for an LSP position; columns past the end of a line clamp to it.
 	pub fn offset(&self, text: &str, pos: Position) -> Option<usize> {
 		let start = *self.starts.get(pos.line as usize)?;
-		let end = self.starts.get(pos.line as usize + 1).copied().unwrap_or(text.len());
+		let end = self
+			.starts
+			.get(pos.line as usize + 1)
+			.copied()
+			.unwrap_or(text.len());
 		let mut units = 0;
 		for (i, c) in text[start..end].char_indices() {
 			if units >= pos.character || c == '\n' {

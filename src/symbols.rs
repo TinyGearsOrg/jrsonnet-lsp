@@ -70,10 +70,16 @@ fn object_symbols(doc: &Document, obj: &ExprObject) -> Vec<DocumentSymbol> {
 	for member in body.members() {
 		match member {
 			Member::MemberBindStmt(l) => {
-				out.extend(l.obj_local().and_then(|l| l.bind()).and_then(|b| bind_symbol(doc, &b)));
+				out.extend(
+					l.obj_local()
+						.and_then(|l| l.bind())
+						.and_then(|b| bind_symbol(doc, &b)),
+				);
 			}
 			Member::MemberFieldNormal(f) => {
-				let Some((name, sel)) = field_name(&f.field_name()) else { continue };
+				let Some((name, sel)) = field_name(&f.field_name()) else {
+					continue;
+				};
 				let value = f.expr();
 				let children = value
 					.as_ref()
@@ -84,11 +90,27 @@ fn object_symbols(doc: &Document, obj: &ExprObject) -> Vec<DocumentSymbol> {
 				} else {
 					SymbolKind::FIELD
 				};
-				out.push(symbol(doc, name, kind, f.syntax().text_range(), sel, children));
+				out.push(symbol(
+					doc,
+					name,
+					kind,
+					f.syntax().text_range(),
+					sel,
+					children,
+				));
 			}
 			Member::MemberFieldMethod(f) => {
-				let Some((name, sel)) = field_name(&f.field_name()) else { continue };
-				out.push(symbol(doc, name, SymbolKind::METHOD, f.syntax().text_range(), sel, vec![]));
+				let Some((name, sel)) = field_name(&f.field_name()) else {
+					continue;
+				};
+				out.push(symbol(
+					doc,
+					name,
+					SymbolKind::METHOD,
+					f.syntax().text_range(),
+					sel,
+					vec![],
+				));
 			}
 			Member::MemberAssertStmt(_) => {}
 		}
@@ -111,7 +133,10 @@ fn field_name(name: &Option<FieldName>) -> Option<(String, TextRange)> {
 		return Some((id.text().to_owned(), id.text_range()));
 	}
 	let text = jrsonnet_rowan_parser::AstToken::syntax(&n.text()?).clone();
-	Some((imports::string_value(text.kind(), text.text())?, text.text_range()))
+	Some((
+		imports::string_value(text.kind(), text.text())?,
+		text.text_range(),
+	))
 }
 
 #[allow(deprecated)]

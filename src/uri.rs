@@ -56,6 +56,9 @@ mod tests {
 
 	#[test]
 	fn rejects_other_schemes() {
-		assert_eq!(to_path(&Uri::from_str("untitled:Untitled-1").unwrap()), None);
+		assert_eq!(
+			to_path(&Uri::from_str("untitled:Untitled-1").unwrap()),
+			None
+		);
 	}
 }

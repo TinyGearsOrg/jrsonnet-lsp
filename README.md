@@ -13,7 +13,8 @@ Early work in progress. It talks LSP over stdio: `cargo run`.
 - Go to definition, find references, and rename for local variables, function
   parameters, destructured names and comprehension variables
 - `import`, `importstr` and `importbin` paths: go to the imported file, clickable links,
-  and a warning when the file can't be found
+  and a warning when the file can't be found, re-checked when files change on disk (needs a
+  client that supports watched-file registration)
 - Go to definition of `x.field` and completion after `.`, following object literals, `+`,
   parentheses, `local` names, `import`s, `self`/`super`/`$` and chained fields across files
   (static, best effort: no calls, conditionals or `std`)
@@ -34,7 +35,7 @@ warning, since the real run may use different `-J` paths.
 
 - Signature help, and std documentation in hover
 - jrsonnet-specific syntax and builtins beyond what the parser already accepts
-- Re-checking imports when files change on disk, and Windows paths
+- Windows paths
 - Incremental text sync, and hint-level diagnostics once `SyntaxError` is exported upstream
 
 ## Development

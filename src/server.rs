@@ -7,28 +7,27 @@ use std::{
 
 use anyhow::Result;
 use jrsonnet_formatter::{FormatOptions, format};
-use jrsonnet_rowan_parser::{
-	SyntaxKind,
-};
+use jrsonnet_rowan_parser::SyntaxKind;
 use lsp_server::{Connection, ErrorCode, Message, Notification, Request, Response};
 use lsp_types::{
-	Diagnostic, DiagnosticSeverity, DidChangeTextDocumentParams, DidCloseTextDocumentParams,
 	CompletionItem, CompletionItemKind, CompletionOptions, CompletionParams, CompletionResponse,
-	DocumentSymbolParams, DocumentSymbolResponse, Hover, HoverContents, HoverParams,
-	HoverProviderCapability, MarkupContent, MarkupKind,
-	DocumentLink, DocumentLinkOptions, DocumentLinkParams,
-	DidOpenTextDocumentParams, DocumentFormattingParams, GotoDefinitionParams,
-	GotoDefinitionResponse, InitializeParams, Location, OneOf, Position, PrepareRenameResponse,
-	PublishDiagnosticsParams, ReferenceParams, RenameOptions, RenameParams, ServerCapabilities,
+	Diagnostic, DiagnosticSeverity, DidChangeTextDocumentParams,
+	DidChangeWatchedFilesRegistrationOptions, DidCloseTextDocumentParams,
+	DidOpenTextDocumentParams, DocumentFormattingParams, DocumentLink, DocumentLinkOptions,
+	DocumentLinkParams, DocumentSymbolParams, DocumentSymbolResponse, FileSystemWatcher,
+	GlobPattern, GotoDefinitionParams, GotoDefinitionResponse, Hover, HoverContents, HoverParams,
+	HoverProviderCapability, InitializeParams, Location, MarkupContent, MarkupKind, OneOf,
+	Position, PrepareRenameResponse, PublishDiagnosticsParams, ReferenceParams, Registration,
+	RegistrationParams, RenameOptions, RenameParams, ServerCapabilities,
 	TextDocumentPositionParams, TextDocumentSyncCapability, TextDocumentSyncKind, TextEdit, Uri,
 	WorkspaceEdit,
 	notification::{
-		DidChangeTextDocument, DidCloseTextDocument, DidOpenTextDocument, Notification as _,
-		PublishDiagnostics,
+		DidChangeTextDocument, DidChangeWatchedFiles, DidCloseTextDocument, DidOpenTextDocument,
+		Notification as _, PublishDiagnostics,
 	},
 	request::{
-		Completion, DocumentLinkRequest, DocumentSymbolRequest, Formatting, HoverRequest, GotoDefinition, PrepareRenameRequest, References, Rename,
-		Request as _,
+		Completion, DocumentLinkRequest, DocumentSymbolRequest, Formatting, GotoDefinition,
+		HoverRequest, PrepareRenameRequest, References, Rename, Request as _,
 	},
 };
 
@@ -37,8 +36,7 @@ use crate::{
 	fields::{self, Fields, Files},
 	imports,
 	scope::{self, Resolution},
-	stdlib, symbols,
-	uri,
+	stdlib, symbols, uri,
 };
 
 pub fn run() -> Result<()> {
@@ -66,6 +64,7 @@ pub fn run() -> Result<()> {
 	})?;
 	let init = connection.initialize(capabilities)?;
 	let params: InitializeParams = serde_json::from_value(init)?;
+	watch_jsonnet_files(&connection, &params)?;
 
 	Server {
 		connection: &connection,
@@ -79,13 +78,53 @@ pub fn run() -> Result<()> {
 	Ok(())
 }
 
+/// Asks the client to report changes to Jsonnet files, so import diagnostics can be refreshed
+/// when an imported file is created, deleted or edited outside the editor.
+fn watch_jsonnet_files(connection: &Connection, params: &InitializeParams) -> Result<()> {
+	let supported = params
+		.capabilities
+		.workspace
+		.as_ref()
+		.and_then(|w| w.did_change_watched_files.as_ref())
+		.and_then(|c| c.dynamic_registration)
+		.unwrap_or(false);
+	if !supported {
+		return Ok(());
+	}
+	let options = DidChangeWatchedFilesRegistrationOptions {
+		watchers: vec![FileSystemWatcher {
+			glob_pattern: GlobPattern::String("**/*.{jsonnet,libsonnet}".to_owned()),
+			kind: None,
+		}],
+	};
+	let registration = RegistrationParams {
+		registrations: vec![Registration {
+			id: "watch-jsonnet-files".to_owned(),
+			method: DidChangeWatchedFiles::METHOD.to_owned(),
+			register_options: Some(serde_json::to_value(options)?),
+		}],
+	};
+	connection.sender.send(
+		Request::new(
+			"register-watchers".to_owned().into(),
+			"client/registerCapability".to_owned(),
+			registration,
+		)
+		.into(),
+	)?;
+	Ok(())
+}
+
 /// Directories imports are looked up in after the importing file's own directory:
 /// the workspace roots and their `vendor` (jsonnet-bundler) and `lib` directories, then any
 /// `jpath` given in the client's initialization options (relative to the first root).
 fn search_paths(params: &InitializeParams) -> Vec<PathBuf> {
 	#[allow(deprecated)]
 	let roots: Vec<PathBuf> = match &params.workspace_folders {
-		Some(folders) => folders.iter().filter_map(|f| uri::to_path(&f.uri)).collect(),
+		Some(folders) => folders
+			.iter()
+			.filter_map(|f| uri::to_path(&f.uri))
+			.collect(),
 		None => params.root_uri.iter().filter_map(uri::to_path).collect(),
 	};
 	let mut out = vec![];
@@ -106,7 +145,6 @@ fn search_paths(params: &InitializeParams) -> Vec<PathBuf> {
 	}
 	out
 }
-
 
 /// Finds imported files among the open buffers first, then on disk, parsing each at most once
 /// per request.
@@ -183,7 +221,9 @@ impl Server<'_> {
 			serde_json::from_value(req.params.clone())
 				.map_err(|e| (ErrorCode::InvalidParams, e.to_string()))
 		}
-		fn json<T: serde::Serialize>(v: T) -> std::result::Result<serde_json::Value, (ErrorCode, String)> {
+		fn json<T: serde::Serialize>(
+			v: T,
+		) -> std::result::Result<serde_json::Value, (ErrorCode, String)> {
 			serde_json::to_value(v).map_err(|e| (ErrorCode::InternalError, e.to_string()))
 		}
 
@@ -197,7 +237,10 @@ impl Server<'_> {
 			Completion::METHOD => json(self.completion(&params(&req)?)),
 			DocumentSymbolRequest::METHOD => json(self.document_symbols(&params(&req)?)),
 			HoverRequest::METHOD => json(self.hover(&params(&req)?)),
-			m => Err((ErrorCode::MethodNotFound, format!("unsupported request {m}"))),
+			m => Err((
+				ErrorCode::MethodNotFound,
+				format!("unsupported request {m}"),
+			)),
 		}
 	}
 
@@ -214,6 +257,7 @@ impl Server<'_> {
 					self.update(p.text_document.uri, change.text)?;
 				}
 			}
+			DidChangeWatchedFiles::METHOD => self.refresh_diagnostics()?,
 			DidCloseTextDocument::METHOD => {
 				let p: DidCloseTextDocumentParams = serde_json::from_value(not.params)?;
 				self.docs.remove(&p.text_document.uri);
@@ -229,6 +273,15 @@ impl Server<'_> {
 		let diagnostics = diagnostics(&doc, |path| self.resolve_import(&uri, path));
 		self.docs.insert(uri.clone(), doc);
 		self.publish(uri, diagnostics)
+	}
+
+	/// Re-checks every open document, e.g. after files it imports changed on disk.
+	fn refresh_diagnostics(&self) -> Result<()> {
+		for (uri, doc) in &self.docs {
+			let diagnostics = diagnostics(doc, |path| self.resolve_import(uri, path));
+			self.publish(uri.clone(), diagnostics)?;
+		}
+		Ok(())
 	}
 
 	fn publish(&self, uri: Uri, diagnostics: Vec<Diagnostic>) -> Result<()> {
@@ -257,7 +310,10 @@ impl Server<'_> {
 		if formatted == doc.text {
 			return Some(vec![]);
 		}
-		Some(vec![TextEdit::new(doc.index.full_range(&doc.text), formatted)])
+		Some(vec![TextEdit::new(
+			doc.index.full_range(&doc.text),
+			formatted,
+		)])
 	}
 
 	/// The file an import path in the document at `uri` refers to, if it exists.
@@ -297,7 +353,8 @@ impl Server<'_> {
 	fn suffix_index_at(doc: &Document, pos: Position) -> Option<jrsonnet_rowan_parser::SyntaxNode> {
 		let offset = doc.offset(pos)?;
 		let tok = doc.root.token_at_offset(offset.into()).left_biased()?;
-		tok.parent_ancestors().find(|n| n.kind() == SyntaxKind::SUFFIX_INDEX)
+		tok.parent_ancestors()
+			.find(|n| n.kind() == SyntaxKind::SUFFIX_INDEX)
 	}
 
 	/// Fields of the object that the `.name` under the cursor is being looked up in.
@@ -360,7 +417,14 @@ impl Server<'_> {
 			if is_std_receiver(&suffix) {
 				let known = stdlib::NAMES.contains(&tok.text());
 				return known.then(|| {
-					hover(doc, range, format!("{}\n\nStandard library member", code(&format!("std.{}", tok.text()))))
+					hover(
+						doc,
+						range,
+						format!(
+							"{}\n\nStandard library member",
+							code(&format!("std.{}", tok.text()))
+						),
+					)
 				});
 			}
 			let field = fields::before_suffix(&self.loader(), doc, &suffix)?
@@ -372,14 +436,22 @@ impl Server<'_> {
 			} else {
 				format!("\n\n{}", uri::to_path(&field.doc.uri)?.display())
 			};
-			return Some(hover(doc, range, format!("{}{origin}", code(&snippet(&member)))));
+			return Some(hover(
+				doc,
+				range,
+				format!("{}{origin}", code(&snippet(&member))),
+			));
 		}
 
 		match scope::decl_at(&doc.root, &tok)? {
 			Resolution::Std => Some(hover(doc, range, "The Jsonnet standard library".to_owned())),
 			Resolution::Local(decl) => {
 				let (site, label) = scope::decl_site(&doc.root, &decl)?;
-				Some(hover(doc, range, code(&format!("{label}{}", snippet(&site)))))
+				Some(hover(
+					doc,
+					range,
+					code(&format!("{label}{}", snippet(&site))),
+				))
 			}
 			Resolution::Unresolved => None,
 		}
@@ -402,14 +474,18 @@ impl Server<'_> {
 			.fields_at(doc, pos)?
 			.into_iter()
 			.find(|f| f.name == tok.text())?;
-		Some(Location::new(field.doc.uri.clone(), field.doc.range(field.name_range)))
+		Some(Location::new(
+			field.doc.uri.clone(),
+			field.doc.range(field.name_range),
+		))
 	}
 
 	fn definition(&self, params: &GotoDefinitionParams) -> Option<GotoDefinitionResponse> {
 		let pos = &params.text_document_position_params;
 		let doc = self.docs.get(&pos.text_document.uri)?;
 		if let Some(import) = doc.import_at(pos.position) {
-			let target = uri::from_path(&self.resolve_import(&pos.text_document.uri, &import.path)?)?;
+			let target =
+				uri::from_path(&self.resolve_import(&pos.text_document.uri, &import.path)?)?;
 			let start = Position::new(0, 0);
 			return Some(GotoDefinitionResponse::Scalar(Location::new(
 				target,
@@ -450,7 +526,10 @@ impl Server<'_> {
 		Some(PrepareRenameResponse::Range(doc.range(tok.text_range())))
 	}
 
-	fn rename(&self, params: &RenameParams) -> std::result::Result<Option<WorkspaceEdit>, (ErrorCode, String)> {
+	fn rename(
+		&self,
+		params: &RenameParams,
+	) -> std::result::Result<Option<WorkspaceEdit>, (ErrorCode, String)> {
 		let pos = &params.text_document_position;
 		if !scope::is_valid_ident(&params.new_name) {
 			return Err((
@@ -475,7 +554,10 @@ impl Server<'_> {
 	}
 }
 
-fn diagnostics(doc: &Document, resolve_import: impl Fn(&str) -> Option<PathBuf>) -> Vec<Diagnostic> {
+fn diagnostics(
+	doc: &Document,
+	resolve_import: impl Fn(&str) -> Option<PathBuf>,
+) -> Vec<Diagnostic> {
 	let syntax = doc.errors.iter().map(|e| Diagnostic {
 		range: doc.range(e.range),
 		// TODO: SyntaxError isn't exported upstream, so `Hint`s can't be told apart.
@@ -507,7 +589,10 @@ fn diagnostics(doc: &Document, resolve_import: impl Fn(&str) -> Option<PathBuf>)
 			range: doc.range(i.range),
 			severity: Some(DiagnosticSeverity::WARNING),
 			source: Some("jsonnet-lsp".to_owned()),
-			message: format!("cannot find `{}` in the importing directory or search paths", i.path),
+			message: format!(
+				"cannot find `{}` in the importing directory or search paths",
+				i.path
+			),
 			..Default::default()
 		});
 	syntax.chain(unresolved).chain(missing_imports).collect()
@@ -516,7 +601,9 @@ fn diagnostics(doc: &Document, resolve_import: impl Fn(&str) -> Option<PathBuf>)
 /// Whether `suffix` is the first `.name` on the bare identifier `std`.
 fn is_std_receiver(suffix: &jrsonnet_rowan_parser::SyntaxNode) -> bool {
 	use jrsonnet_rowan_parser::{AstNode as _, nodes::ExprVar};
-	let Some(expr) = suffix.parent() else { return false };
+	let Some(expr) = suffix.parent() else {
+		return false;
+	};
 	let mut parts = expr
 		.children()
 		.filter(|c| !matches!(c.kind(), SyntaxKind::STMT_LOCAL | SyntaxKind::STMT_ASSERT));
@@ -527,7 +614,11 @@ fn is_std_receiver(suffix: &jrsonnet_rowan_parser::SyntaxNode) -> bool {
 		&& ExprVar::cast(base).and_then(|v| scope::resolve(&v)) == Some(Resolution::Std)
 }
 
-fn hover(doc: &Document, range: jrsonnet_rowan_parser::rowan::TextRange, markdown: String) -> Hover {
+fn hover(
+	doc: &Document,
+	range: jrsonnet_rowan_parser::rowan::TextRange,
+	markdown: String,
+) -> Hover {
 	Hover {
 		contents: HoverContents::Markup(MarkupContent {
 			kind: MarkupKind::Markdown,

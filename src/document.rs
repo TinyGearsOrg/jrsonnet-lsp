@@ -1,6 +1,5 @@
 use jrsonnet_rowan_parser::{
-	AstNode,
-	LocatedSyntaxError, SyntaxKind, SyntaxNode, SyntaxToken, parse, rowan::TextRange,
+	AstNode, LocatedSyntaxError, SyntaxKind, SyntaxNode, SyntaxToken, parse, rowan::TextRange,
 };
 use lsp_types::{Position, Uri};
 

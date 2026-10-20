@@ -96,7 +96,9 @@ mod tests {
 	#[test]
 	fn collects_all_import_kinds() {
 		assert_eq!(
-			paths(r#"[import "a.libsonnet", importstr 'b.txt', importbin "c.bin", import @"d""e"]"#),
+			paths(
+				r#"[import "a.libsonnet", importstr 'b.txt', importbin "c.bin", import @"d""e"]"#
+			),
 			["a.libsonnet", "b.txt", "c.bin", "d\"e"]
 		);
 	}
@@ -120,14 +122,27 @@ mod tests {
 		let importer = Some(Path::new("/ws/src/main.jsonnet"));
 		// Importer's directory wins over search paths.
 		assert_eq!(
-			resolve(importer, "l.libsonnet", &search, have(&["/ws/src/l.libsonnet", "/ws/vendor/l.libsonnet"])),
+			resolve(
+				importer,
+				"l.libsonnet",
+				&search,
+				have(&["/ws/src/l.libsonnet", "/ws/vendor/l.libsonnet"])
+			),
 			Some("/ws/src/l.libsonnet".into())
 		);
 		assert_eq!(
-			resolve(importer, "l.libsonnet", &search, have(&["/ws/vendor/l.libsonnet"])),
+			resolve(
+				importer,
+				"l.libsonnet",
+				&search,
+				have(&["/ws/vendor/l.libsonnet"])
+			),
 			Some("/ws/vendor/l.libsonnet".into())
 		);
 		assert_eq!(resolve(importer, "l.libsonnet", &search, have(&[])), None);
-		assert_eq!(resolve(None, "/abs/x", &search, have(&["/abs/x"])), Some("/abs/x".into()));
+		assert_eq!(
+			resolve(None, "/abs/x", &search, have(&["/abs/x"])),
+			Some("/abs/x".into())
+		);
 	}
 }
