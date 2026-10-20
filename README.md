@@ -10,6 +10,7 @@ built on jrsonnet's parser and formatter, with a VS Code extension that bundles 
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue" alt="License: MIT"></a>
   <img src="https://img.shields.io/badge/Rust-stable-orange" alt="Rust: stable">
   <img src="https://img.shields.io/badge/VS%20Code-1.91%2B-blue" alt="VS Code 1.91+">
+  <a href="https://open-vsx.org/extension/TinyGears/jrsonnet-lsp"><img src="https://img.shields.io/open-vsx/v/TinyGears/jrsonnet-lsp" alt="Open VSX"></a>
   <a href="https://github.com/deltarocks/jrsonnet"><img src="https://img.shields.io/badge/built%20on-jrsonnet-8a5cf5" alt="Built on jrsonnet"></a>
 </p>
 

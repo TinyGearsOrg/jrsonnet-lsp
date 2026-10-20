@@ -21,8 +21,8 @@ Lookups are static and best effort: calls, conditionals and comprehensions are n
 
 ## Install
 
-- **VSCodium and other Open VSX editors:** search for *Jsonnet (jrsonnet-lsp)* in the extensions view
-  once it is published there.
+- **VSCodium and other Open VSX editors:** search for *Jsonnet (jrsonnet-lsp)* in the extensions view,
+  or open it on [Open VSX](https://open-vsx.org/extension/TinyGears/jrsonnet-lsp).
 - **Visual Studio Code:** it uses a different registry, so download the `.vsix` for your platform
   from the [GitHub releases](https://github.com/TinyGearsOrg/jrsonnet-lsp/releases) and run
   `code --install-extension jrsonnet-lsp-<platform>-<version>.vsix`, or use *Extensions: Install from
