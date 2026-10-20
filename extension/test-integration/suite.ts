@@ -156,7 +156,14 @@ export async function run(): Promise<void> {
     const edit = new vscode.WorkspaceEdit();
     edit.insert(mainUri, new vscode.Position(0, 0), '// touched\n');
     await vscode.workspace.applyEdit(edit);
-    await waitFor('diagnostics after the restart', () => (diagnostics().some((d) => /nope/.test(d.message)) ? true : undefined));
+    // The diagnostics from before the restart are still there until the new server replaces them,
+    // so wait for the warning to move down a line: that only happens once the new server has the
+    // inserted line, and it is what makes the checks below about the new server, not a race.
+    const importLine = doc.positionAt(doc.getText().indexOf("import 'nope.libsonnet'")).line;
+    await waitFor(
+      `the warning on line ${importLine} (is at ${diagnostics().map((d) => d.range.start.line)})`,
+      () => (diagnostics().some((d) => /nope/.test(d.message) && d.range.start.line === importLine) ? true : undefined),
+    );
     const hovers = await exec<vscode.Hover[]>('vscode.executeHoverProvider', mainUri, at('greet(name)', 2));
     assert.match(hovers.map((h) => text(h.contents)).join('\n'), /greet/);
   });
