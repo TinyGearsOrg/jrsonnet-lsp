@@ -1,19 +1,24 @@
 name: Release
 
 # Push a tag like v0.1.0 (matching the version in extension/package.json) to build the
-# platform-specific VSIXes and attach them to a GitHub release. They are also published to the
-# Marketplace, with trusted publishing (OpenID Connect, no stored token), once the repository
-# variable MARKETPLACE_PUBLISH is set to "true". Until then a release only creates the GitHub
-# release, whose VSIXes can be uploaded to the Marketplace by hand. See "Releasing" in
-# extension/README.md.
+# platform-specific VSIXes and attach them to a GitHub release. They are also published to Open VSX,
+# with trusted publishing (OpenID Connect, no stored token), once the repository variable
+# OPEN_VSX_PUBLISH is set to "true". Until then a release only creates the GitHub release, whose
+# VSIXes can be uploaded to Open VSX by hand. See "Releasing" in extension/README.md.
 #
 # Running the workflow by hand (Actions, Run workflow) builds and packages everything without
 # releasing or publishing, which is how to check a change to this file.
+#
+# No build cache is used here (nor in setup-node): a release must not be built from a cache that
+# another workflow could have poisoned.
 
 on:
   push:
     tags: ['v*']
   workflow_dispatch:
+
+# Nothing by default; each job asks for what it needs.
+permissions: {}
 
 env:
   CARGO_TERM_COLOR: always
@@ -38,21 +43,23 @@ jobs:
           - { vsce: win32-x64, platform: win32-x64, os: windows-latest, rust: x86_64-pc-windows-msvc, smoke: true }
           - { vsce: win32-arm64, platform: win32-arm64, os: windows-latest, rust: aarch64-pc-windows-msvc, smoke: false }
     runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
     defaults:
       run:
         shell: bash
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 22
+          package-manager-cache: false
       - name: The tag matches the extension's version
         if: startsWith(github.ref, 'refs/tags/')
         run: test "v$(node -p "require('./extension/package.json').version")" = "$GITHUB_REF_NAME"
       - run: rustup toolchain install stable --profile minimal --target ${{ matrix.rust }}
-      - uses: Swatinem/rust-cache@v2
-        with:
-          key: ${{ matrix.rust }}
       - run: ./scripts/setup-jrsonnet.sh
       - run: cargo build --release --target ${{ matrix.rust }}
       - name: The binary starts and speaks LSP
@@ -69,7 +76,7 @@ jobs:
           case "${{ matrix.platform }}" in win32-*) exe=jsonnet-lsp.exe ;; esac
           node scripts/bundle-server.mjs --platform ${{ matrix.platform }} --binary ../target/${{ matrix.rust }}/release/$exe
           node scripts/package.mjs --target ${{ matrix.vsce }}
-      - uses: actions/upload-artifact@v7.0.1
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: vsix-${{ matrix.platform }}
           path: extension/*.vsix
@@ -81,7 +88,7 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/download-artifact@v8.0.1
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           pattern: vsix-*
           path: dist
@@ -91,26 +98,31 @@ jobs:
           GH_TOKEN: ${{ github.token }}
 
   # Kept apart from the job above: this is the only one that may ask GitHub for an OIDC token, so
-  # it installs just vsce, without running any install scripts, and has no write access to the repo.
-  marketplace:
+  # it installs only ovsx (from publish/, apart from the extension's own dependencies) without
+  # running any install scripts, and has no write access to the repository. `--skip-duplicate`
+  # makes a re-run after a partial failure safe.
+  open-vsx:
     needs: release
-    if: ${{ startsWith(github.ref, 'refs/tags/') && vars.MARKETPLACE_PUBLISH == 'true' }}
+    if: ${{ startsWith(github.ref, 'refs/tags/') && vars.OPEN_VSX_PUBLISH == 'true' }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
       id-token: write
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 22
-      - uses: actions/download-artifact@v8.0.1
+          package-manager-cache: false
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           pattern: vsix-*
           path: dist
           merge-multiple: true
       - name: Publish with trusted publishing
-        working-directory: extension
+        working-directory: publish
         run: |
           npm ci --ignore-scripts
-          npx vsce publish --oidc --packagePath ../dist/*.vsix
+          npx ovsx publish --trusted-publishing --skip-duplicate --packagePath ../dist/*.vsix

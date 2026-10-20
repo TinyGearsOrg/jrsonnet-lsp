@@ -1,0 +1,10 @@
+{
+  "name": "jrsonnet-lsp-publish",
+  "version": "0.0.0",
+  "private": true,
+  "description": "The tool that publishes the extension to Open VSX, kept apart so the job that holds publishing rights installs nothing else",
+  "license": "MIT",
+  "dependencies": {
+    "ovsx": "1.2.0"
+  }
+}

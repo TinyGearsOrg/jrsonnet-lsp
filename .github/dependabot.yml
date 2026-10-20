@@ -1,0 +1,17 @@
+# Keeps pinned dependencies up to date: the commit SHAs of the actions the workflows use, and ovsx
+# in publish/. A new version is only proposed once it is two weeks old.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 14
+  # ovsx, which publishes the extension (pinned in publish/).
+  - package-ecosystem: npm
+    directory: /publish
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 14
