@@ -82,7 +82,7 @@ make package  # VSIX for this platform, with the server bundled
    is for judging syntax highlighting.
 
 To try the packaged extension instead: `make package`, then
-`code --install-extension extension/jrsonnet-lsp-linux-x64-0.0.1.vsix`.
+`code --install-extension extension/jrsonnet-lsp-linux-x64-<version>.vsix`.
 
 ### Checklist for `demo/main.jsonnet`
 

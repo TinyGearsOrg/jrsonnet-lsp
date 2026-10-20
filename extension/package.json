@@ -2,7 +2,7 @@
   "name": "jrsonnet-lsp",
   "displayName": "Jsonnet (jrsonnet-lsp)",
   "description": "Jsonnet language support powered by a language server built on jrsonnet",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "publisher": "TinyGears",
   "license": "MIT",
   "icon": "images/icon.png",
