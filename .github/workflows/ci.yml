@@ -54,8 +54,7 @@ jobs:
           name: vsix-linux-x64
           path: extension/*.vsix
 
-  # The platforms that are not packaged yet, so problems show up here before a release matrix
-  # entry is enabled for them (see release.yml).
+  # The same tests, and the extension in a real VS Code, on the other operating systems.
   other-platforms:
     strategy:
       fail-fast: false

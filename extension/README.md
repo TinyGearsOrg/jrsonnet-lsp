@@ -21,10 +21,10 @@ Lookups are static and best effort: calls, conditionals and comprehensions are n
 
 ## Platforms
 
-Packaged for **linux-x64** and **alpine-x64**. The Linux server is a static musl binary, so it
-runs on any distribution whatever its glibc version. On other platforms, build `jsonnet-lsp`
-yourself (see below) and point `jrsonnet-lsp.server.path` at it; macOS and Windows packages are
-planned.
+Packages are built for Linux and Alpine (x64 and arm64), macOS (arm64 and x64) and Windows (x64 and
+arm64). The Linux server is a static musl binary, so it runs on any distribution whatever its glibc
+version. On another platform, build `jsonnet-lsp` yourself (see below) and point
+`jrsonnet-lsp.server.path` at it.
 
 ## Settings
 
@@ -128,7 +128,8 @@ node scripts/package.mjs --target linux-x64,alpine-x64
 
 `--platform` only decides whether the binary is called `.exe`. Without arguments both scripts
 use this machine's platform, which is what `make package` does. CI builds the real packages per
-platform; see `.github/workflows/release.yml`, where a platform is one matrix entry.
+platform; see `.github/workflows/release.yml`, where a platform is one matrix entry. Running that
+workflow by hand builds and packages everything without releasing anything.
 
 ## License
 

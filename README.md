@@ -99,13 +99,15 @@ jrsonnet's own `std` provides, including its additions to the standard library.
 
 ## Platforms
 
-Developed and tested on Linux. The Linux release is a static musl binary (also used for Alpine), and
-the whole test suite passes against it. The code type-checks, tests included, for Windows (x64 and
-arm64), macOS (both architectures) and Linux on ARM, but only Linux has been run: CI runs the tests
-and the extension in a real VS Code on macOS and Windows, and releases for them are enabled once
-that is green. Windows drive-letter URIs (`file:///c%3A/...` as VS Code sends them, or
-`file:///C:/...`) and path comparison are handled and unit-tested. UNC paths
-(`file://server/share/...`) are not supported.
+Releases are built for Linux and Alpine (x64 and arm64, static musl binaries that run on any
+distribution), macOS (arm64 and x64) and Windows (x64 and arm64).
+
+CI runs the tests on Linux, macOS and Windows, and the extension in a real VS Code on each of them.
+The release build starts every binary that can run on its build machine (Linux x64 and arm64, macOS
+arm64, Windows x64) and checks that it answers LSP. The macOS x64 and Windows arm64 binaries are
+cross-compiled and have only been built, not run. Windows drive-letter URIs (`file:///c%3A/...` as
+VS Code sends them, or `file:///C:/...`) are handled; UNC paths (`file://server/share/...`) are not
+supported.
 
 ## License
 
