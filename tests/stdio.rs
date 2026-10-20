@@ -616,3 +616,66 @@ fn signature_help() {
 	assert!(sig(&mut c, col("f(1, 2)") + 7).is_null());
 	c.finish();
 }
+
+#[test]
+fn std_signatures() {
+	let mut c = Client::start();
+	c.initialize();
+	let uri = "file:///stdsig.jsonnet";
+	let src = "std.avg([1], 2) + std.base64Decode('x', lossy = true) + std.nope(1)";
+	c.open(uri, src);
+	let col = |needle: &str| src.find(needle).unwrap() as u64;
+
+	let mut id = 0;
+	let mut req = |c: &mut Client, uri: &str, method: &str, character: u64| {
+		id += 1;
+		let params =
+			json!({"textDocument":{"uri":uri},"position":{"line":0,"character":character}});
+		c.request(id, method, params)["result"].clone()
+	};
+	const SIG: &str = "textDocument/signatureHelp";
+
+	let r = req(&mut c, uri, SIG, col("avg(") + 4);
+	assert_eq!(r["signatures"][0]["label"], "std.avg(arr, onEmpty = …)");
+	assert_eq!(r["activeParameter"], 0);
+	assert_eq!(req(&mut c, uri, SIG, col("2)"))["activeParameter"], 1);
+
+	// A named argument selects its parameter, even with a default shown after the name.
+	let r = req(&mut c, uri, SIG, col("true"));
+	assert_eq!(
+		r["signatures"][0]["label"],
+		"std.base64Decode(str, lossy = false)"
+	);
+	assert_eq!(r["activeParameter"], 1);
+
+	// Unknown members have no signature.
+	assert!(req(&mut c, uri, SIG, col("nope(") + 5).is_null());
+
+	// Hover shows the parameters.
+	let h = req(&mut c, uri, "textDocument/hover", col("avg") + 1);
+	assert!(
+		h["contents"]["value"]
+			.as_str()
+			.unwrap()
+			.contains("std.avg(arr, onEmpty = …)")
+	);
+
+	// A local named `std` is not the standard library.
+	let shadow = "file:///stdshadow.jsonnet";
+	let src = "local std = { avg(q):: q }; std.avg(1)";
+	c.open(shadow, src);
+	let r = req(&mut c, shadow, SIG, src.find("avg(1").unwrap() as u64 + 4);
+	assert_eq!(r["signatures"][0]["label"], "avg(q)");
+
+	// Completion carries the parameters, and marks plain values as constants.
+	let comp = "file:///stdcomp.jsonnet";
+	c.open(comp, "std.");
+	let items = req(&mut c, comp, "textDocument/completion", 4);
+	let items = items.as_array().unwrap();
+	let avg = items.iter().find(|i| i["label"] == "avg").unwrap();
+	assert_eq!(avg["detail"], "(arr, onEmpty = …)");
+	let pi = items.iter().find(|i| i["label"] == "pi").unwrap();
+	assert_eq!(pi["kind"], 21); // CompletionItemKind::CONSTANT
+	assert!(pi["detail"].is_null());
+	c.finish();
+}

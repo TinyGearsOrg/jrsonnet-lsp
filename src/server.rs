@@ -380,9 +380,17 @@ impl Server<'_> {
 		let items = if let Some(suffix) = Self::suffix_index_at(doc, pos.position) {
 			// After a `.`: fields of the object on the left, or the standard library.
 			if is_std_receiver(&suffix) {
-				stdlib::NAMES
+				stdlib::MEMBERS
 					.iter()
-					.map(|n| item(n, CompletionItemKind::FUNCTION))
+					.map(|m| CompletionItem {
+						label: m.name.to_owned(),
+						kind: Some(match m.params {
+							Some(_) => CompletionItemKind::FUNCTION,
+							None => CompletionItemKind::CONSTANT,
+						}),
+						detail: m.params.map(|p| format!("({})", p.join(", "))),
+						..Default::default()
+					})
 					.collect()
 			} else {
 				fields::before_suffix(&self.loader(), doc, &suffix)?
@@ -421,17 +429,16 @@ impl Server<'_> {
 		if name_node.parent()?.kind() == SyntaxKind::SUFFIX_INDEX {
 			let suffix = name_node.parent()?;
 			if is_std_receiver(&suffix) {
-				let known = stdlib::NAMES.contains(&tok.text());
-				return known.then(|| {
-					hover(
-						doc,
-						range,
-						format!(
-							"{}\n\nStandard library member",
-							code(&format!("std.{}", tok.text()))
-						),
-					)
-				});
+				let member = stdlib::find(tok.text())?;
+				let sig = match member.params {
+					Some(params) => format!("std.{}({})", member.name, params.join(", ")),
+					None => format!("std.{}", member.name),
+				};
+				return Some(hover(
+					doc,
+					range,
+					format!("{}\n\nStandard library member", code(&sig)),
+				));
 			}
 			let field = fields::before_suffix(&self.loader(), doc, &suffix)?
 				.into_iter()

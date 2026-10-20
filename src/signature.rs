@@ -1,7 +1,7 @@
 //! Signature help: the parameter list of the function being called, with the active parameter.
 //!
-//! The callee is found statically: a `local` function, or a field reached through
-//! [`fields`]. Anything else (parameters, call results, `std`) has no signature.
+//! The callee is found statically: a `local` function, a field reached through
+//! [`fields`], or a `std` function. Anything else (parameters, call results) has none.
 
 use std::rc::Rc;
 
@@ -15,6 +15,7 @@ use crate::{
 	document::Document,
 	fields::{self, Files},
 	scope::{self, Resolution},
+	stdlib,
 };
 
 pub struct Signature {
@@ -42,35 +43,73 @@ pub fn args_at(doc: &Document, offset: TextSize) -> Option<SyntaxNode> {
 }
 
 pub fn signature(files: &dyn Files, doc: &Rc<Document>, args: &SyntaxNode) -> Option<Signature> {
-	let (name, params) = callee(files, doc, &args.parent()?)?;
-	let params: Vec<_> = params.children().filter_map(Param::cast).collect();
+	let apply = args.parent()?;
+	if let Some(member) = std_member(&apply) {
+		let params = member.params?.iter().map(|p| {
+			// `name = default`: the name is what a named argument matches.
+			let name = p.split(' ').next().map(str::to_owned);
+			((*p).to_owned(), name)
+		});
+		return Some(build(&format!("std.{}", member.name), params));
+	}
 
-	let mut label = format!("{name}(");
-	let mut offsets = vec![];
-	let mut names = vec![];
-	for (i, p) in params.iter().enumerate() {
-		if i > 0 {
-			label.push_str(", ");
-		}
-		let start = label.encode_utf16().count() as u32;
+	let (name, params) = callee(files, doc, &apply)?;
+	let params = params.children().filter_map(Param::cast).map(|p| {
 		// Defaults can span lines; a signature is one line.
 		let text = p.syntax().text().to_string();
-		label.push_str(&text.split_whitespace().collect::<Vec<_>>().join(" "));
-		offsets.push((start, label.encode_utf16().count() as u32));
-		names.push(match p.destruct() {
+		let name = match p.destruct() {
 			Some(Destruct::DestructFull(d)) => d
 				.name()
 				.and_then(|n| n.ident_lit())
 				.map(|t| t.text().to_owned()),
 			_ => None,
-		});
+		};
+		(text.split_whitespace().collect::<Vec<_>>().join(" "), name)
+	});
+	Some(build(&name, params))
+}
+
+/// `name(p1, p2)` from each parameter's text and plain name.
+fn build(name: &str, params: impl Iterator<Item = (String, Option<String>)>) -> Signature {
+	let mut label = format!("{name}(");
+	let mut offsets = vec![];
+	let mut names = vec![];
+	for (i, (text, param_name)) in params.enumerate() {
+		if i > 0 {
+			label.push_str(", ");
+		}
+		let start = label.encode_utf16().count() as u32;
+		label.push_str(&text);
+		offsets.push((start, label.encode_utf16().count() as u32));
+		names.push(param_name);
 	}
 	label.push(')');
-	Some(Signature {
+	Signature {
 		label,
 		params: offsets,
 		names,
-	})
+	}
+}
+
+/// The `std` function called by `apply`, for a plain `std.name(...)`.
+fn std_member(apply: &SyntaxNode) -> Option<&'static stdlib::Member> {
+	let expr = apply.parent()?;
+	let parts: Vec<_> = expr
+		.children()
+		.filter(|c| !matches!(c.kind(), SyntaxKind::STMT_LOCAL | SyntaxKind::STMT_ASSERT))
+		.collect();
+	let [base, index, call, ..] = parts.as_slice() else {
+		return None;
+	};
+	if call != apply || index.kind() != SyntaxKind::SUFFIX_INDEX {
+		return None;
+	}
+	let var = ExprVar::cast(base.clone())?;
+	if scope::resolve(&var)? != Resolution::Std {
+		return None;
+	}
+	let name = index.children().find(|c| c.kind() == SyntaxKind::NAME)?;
+	stdlib::find(&name.text().to_string())
 }
 
 /// Which parameter the cursor is on: the one named by a `name = value` argument, otherwise

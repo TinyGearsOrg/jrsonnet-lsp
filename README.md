@@ -19,12 +19,14 @@ Early work in progress. It talks LSP over stdio: `cargo run`.
   parentheses, `local` names, `import`s, `self`/`super`/`$` and chained fields across files
   (static, best effort: no calls, conditionals or `std`), including through object destructuring
   such as `local {foo, nested: {deep}} = lib;`
-- Hover: a local's binding, a field's declaration (also across files), `std` members by name,
+- Hover: a local's binding, a field's declaration (also across files), `std` members with their parameters,
   and where an import path resolves to
-- Signature help for calls to `local` functions and to methods or function-valued fields found
-  through the same lookup, highlighting the active parameter (by position or `name =`)
-- `std.` completion (names taken from jrsonnet's own `std` at the pinned rev), completion of
-  variables in scope, and a document outline of top-level locals and object fields
+- Signature help for calls to `local` functions, to methods or function-valued fields found
+  through the same lookup, and to `std` functions (with jrsonnet's real parameter names),
+  highlighting the active parameter (by position or `name =`)
+- `std.` completion with each function's parameters (read from jrsonnet's own `std` at the pinned
+  rev), completion of variables in scope, and a document outline of top-level locals and object
+  fields
 
 ## Import search paths
 
@@ -36,7 +38,7 @@ warning, since the real run may use different `-J` paths.
 
 ## Planned
 
-- std documentation in hover, and signature help for `std` functions
+- Prose documentation for `std` functions (only names and parameters are known today)
 - Field lookup through array destructuring and `?.[...]` indexing
 - Windows paths
 - Incremental text sync
@@ -61,8 +63,12 @@ export is released upstream, bump the rev and delete the script, `patches/` and
 ## Development
 
 `cargo test` runs unit tests plus end-to-end tests that drive the binary over stdio.
-`cargo run --example dump -- '<jsonnet>'` prints the CST for a snippet, which is handy
-since the parser's tree doesn't always match `jsonnet.ungram`.
+
+`cargo run --example dump -- '<jsonnet>'` prints the CST for a snippet, which is handy since the
+parser's tree doesn't always match `jsonnet.ungram`.
+
+`./scripts/gen-stdlib.sh` regenerates the `std` table in `src/stdlib/table.rs` from jrsonnet's own
+evaluator. Rerun it after bumping the jrsonnet rev.
 
 
 ## jrsonnet extensions
