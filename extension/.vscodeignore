@@ -7,5 +7,6 @@
 !LICENSE
 !language-configuration.json
 !syntaxes/**
+!images/icon.png
 !out/extension.js
 !server/**
