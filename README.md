@@ -13,15 +13,26 @@ Early work in progress. It talks LSP over stdio: `cargo run`.
 - Go to definition, find references, and rename for local variables, function
   parameters, destructured names and comprehension variables
 
+- `import`, `importstr` and `importbin` paths: go to the imported file, clickable links,
+  and a warning when the file can't be found
+
+## Import search paths
+
+An import is looked up relative to the importing file first, then in each workspace
+folder and its `vendor/` (jsonnet-bundler) and `lib/` directories, then in `jpath`. Set
+`jpath` through the client's `initializationOptions`, e.g. `{"jpath": ["extra", "/abs/dir"]}`;
+relative entries are relative to the first workspace folder. A missing import is only a
+warning, since the real run may use different `-J` paths.
+
 ## Planned
 
-- `import` resolution and cross-file navigation
+- Cross-file navigation into imported objects' fields
 - Document symbols, `std.*` completion and hover
-- Field completion and navigation
+- Field completion
 
 ## Development
 
-`cargo test` runs unit tests plus an end-to-end test that drives the binary over stdio.
+`cargo test` runs unit tests plus end-to-end tests that drive the binary over stdio.
 `cargo run --example dump -- '<jsonnet>'` prints the CST for a snippet, which is handy
 since the parser's tree doesn't always match `jsonnet.ungram`.
 

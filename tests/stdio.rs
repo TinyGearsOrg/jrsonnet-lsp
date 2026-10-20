@@ -170,3 +170,46 @@ fn navigation_and_rename() {
 
 	c.finish();
 }
+
+#[test]
+fn imports() {
+	let ws = std::path::Path::new(env!("CARGO_TARGET_TMPDIR")).join("imports-ws");
+	let _ = std::fs::remove_dir_all(&ws);
+	for f in ["main.jsonnet", "sibling.libsonnet", "lib/in-lib.libsonnet", "vendor/in-vendor.libsonnet", "extra/in-jpath.libsonnet"] {
+		let p = ws.join(f);
+		std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+		std::fs::write(p, "{}").unwrap();
+	}
+	let uri_of = |rel: &str| format!("file://{}", ws.join(rel).display());
+
+	let mut c = Client::start();
+	c.send(json!({"jsonrpc":"2.0","id":0,"method":"initialize","params":{
+		"capabilities":{},
+		"workspaceFolders":[{"uri":uri_of(""),"name":"ws"}],
+		"initializationOptions":{"jpath":["extra"]},
+	}}));
+	c.recv();
+	c.send(json!({"jsonrpc":"2.0","method":"initialized","params":{}}));
+
+	let main = uri_of("main.jsonnet");
+	let src = r#"[import "sibling.libsonnet", import "in-lib.libsonnet", importstr "in-vendor.libsonnet", import "in-jpath.libsonnet", import "missing.libsonnet"]"#;
+	let diags = c.open(&main, src);
+	let diags = diags.as_array().unwrap();
+	assert_eq!(diags.len(), 1, "{diags:?}");
+	assert_eq!(diags[0]["severity"], 2);
+	assert!(diags[0]["message"].as_str().unwrap().contains("missing.libsonnet"));
+
+	let links = c.request(1, "textDocument/documentLink", json!({"textDocument":{"uri":main}}));
+	let links = links["result"].as_array().unwrap();
+	assert_eq!(links.len(), 4);
+	assert_eq!(links[0]["target"], uri_of("sibling.libsonnet"));
+	assert_eq!(links[2]["target"], uri_of("vendor/in-vendor.libsonnet"));
+
+	// Column 17 is inside the first path string.
+	let def = c.request(2, "textDocument/definition", json!({
+		"textDocument":{"uri":main},"position":{"line":0,"character":17}}));
+	assert_eq!(def["result"]["uri"], uri_of("sibling.libsonnet"));
+	assert_eq!(def["result"]["range"]["start"], json!({"line":0,"character":0}));
+
+	c.finish();
+}

@@ -1,4 +1,7 @@
-use std::collections::HashMap;
+use std::{
+	collections::HashMap,
+	path::{Path, PathBuf},
+};
 
 use anyhow::Result;
 use jrsonnet_formatter::{FormatOptions, format};
@@ -8,6 +11,7 @@ use jrsonnet_rowan_parser::{
 use lsp_server::{Connection, ErrorCode, Message, Notification, Request, Response};
 use lsp_types::{
 	Diagnostic, DiagnosticSeverity, DidChangeTextDocumentParams, DidCloseTextDocumentParams,
+	DocumentLink, DocumentLinkOptions, DocumentLinkParams,
 	DidOpenTextDocumentParams, DocumentFormattingParams, GotoDefinitionParams,
 	GotoDefinitionResponse, InitializeParams, Location, OneOf, Position, PrepareRenameResponse,
 	PublishDiagnosticsParams, ReferenceParams, RenameOptions, RenameParams, ServerCapabilities,
@@ -18,13 +22,16 @@ use lsp_types::{
 		PublishDiagnostics,
 	},
 	request::{
-		Formatting, GotoDefinition, PrepareRenameRequest, References, Rename, Request as _,
+		DocumentLinkRequest, Formatting, GotoDefinition, PrepareRenameRequest, References, Rename,
+		Request as _,
 	},
 };
 
 use crate::{
+	imports,
 	line_index::LineIndex,
 	scope::{self, Decl, Resolution},
+	uri,
 };
 
 struct Document {
@@ -59,6 +66,14 @@ impl Document {
 			.find(|t| t.kind() == SyntaxKind::IDENT)
 	}
 
+	/// The import whose path string is under the cursor.
+	fn import_at(&self, pos: Position) -> Option<imports::Import> {
+		let offset = u32::try_from(self.index.offset(&self.text, pos)?).ok()?;
+		imports::imports(&self.root)
+			.into_iter()
+			.find(|i| i.range.contains_inclusive(offset.into()))
+	}
+
 	/// The local declaration the identifier at `pos` refers to or declares.
 	fn decl_at(&self, pos: Position) -> Option<Decl> {
 		match scope::decl_at(&self.root, &self.ident_at(pos)?)? {
@@ -79,14 +94,19 @@ pub fn run() -> Result<()> {
 			prepare_provider: Some(true),
 			work_done_progress_options: Default::default(),
 		})),
+		document_link_provider: Some(DocumentLinkOptions {
+			resolve_provider: Some(false),
+			work_done_progress_options: Default::default(),
+		}),
 		..Default::default()
 	})?;
 	let init = connection.initialize(capabilities)?;
-	let _params: InitializeParams = serde_json::from_value(init)?;
+	let params: InitializeParams = serde_json::from_value(init)?;
 
 	Server {
 		connection: &connection,
 		docs: HashMap::new(),
+		search: search_paths(&params),
 	}
 	.main_loop()?;
 	// The writer thread exits only once the sender side is dropped.
@@ -95,9 +115,38 @@ pub fn run() -> Result<()> {
 	Ok(())
 }
 
+/// Directories imports are looked up in after the importing file's own directory:
+/// the workspace roots and their `vendor` (jsonnet-bundler) and `lib` directories, then any
+/// `jpath` given in the client's initialization options (relative to the first root).
+fn search_paths(params: &InitializeParams) -> Vec<PathBuf> {
+	#[allow(deprecated)]
+	let roots: Vec<PathBuf> = match &params.workspace_folders {
+		Some(folders) => folders.iter().filter_map(|f| uri::to_path(&f.uri)).collect(),
+		None => params.root_uri.iter().filter_map(uri::to_path).collect(),
+	};
+	let mut out = vec![];
+	for root in &roots {
+		out.extend([root.clone(), root.join("vendor"), root.join("lib")]);
+	}
+	let jpath = params
+		.initialization_options
+		.as_ref()
+		.and_then(|o| o.get("jpath"))
+		.and_then(|j| j.as_array())
+		.into_iter()
+		.flatten()
+		.filter_map(|p| p.as_str());
+	for p in jpath {
+		// `join` keeps absolute paths as they are.
+		out.push(roots.first().map_or_else(|| p.into(), |r| r.join(p)));
+	}
+	out
+}
+
 struct Server<'a> {
 	connection: &'a Connection,
 	docs: HashMap<Uri, Document>,
+	search: Vec<PathBuf>,
 }
 
 impl Server<'_> {
@@ -153,6 +202,7 @@ impl Server<'_> {
 			References::METHOD => json(self.references(&params(&req)?)),
 			PrepareRenameRequest::METHOD => json(self.prepare_rename(&params(&req)?)),
 			Rename::METHOD => self.rename(&params(&req)?).and_then(json),
+			DocumentLinkRequest::METHOD => json(self.document_links(&params(&req)?)),
 			m => Err((ErrorCode::MethodNotFound, format!("unsupported request {m}"))),
 		}
 	}
@@ -182,7 +232,7 @@ impl Server<'_> {
 
 	fn update(&mut self, uri: Uri, text: String) -> Result<()> {
 		let doc = Document::new(text);
-		let diagnostics = diagnostics(&doc);
+		let diagnostics = diagnostics(&doc, |path| self.resolve_import(&uri, path));
 		self.docs.insert(uri.clone(), doc);
 		self.publish(uri, diagnostics)
 	}
@@ -216,9 +266,42 @@ impl Server<'_> {
 		Some(vec![TextEdit::new(doc.index.full_range(&doc.text), formatted)])
 	}
 
+	/// The file an import path in the document at `uri` refers to, if it exists.
+	fn resolve_import(&self, uri: &Uri, path: &str) -> Option<PathBuf> {
+		let importer = uri::to_path(uri);
+		imports::resolve(importer.as_deref(), path, &self.search, Path::exists)
+	}
+
+	fn document_links(&self, params: &DocumentLinkParams) -> Option<Vec<DocumentLink>> {
+		let uri = &params.text_document.uri;
+		let doc = self.docs.get(uri)?;
+		Some(
+			imports::imports(&doc.root)
+				.into_iter()
+				.filter_map(|i| {
+					let target = uri::from_path(&self.resolve_import(uri, &i.path)?)?;
+					Some(DocumentLink {
+						range: doc.range(i.range),
+						target: Some(target),
+						tooltip: None,
+						data: None,
+					})
+				})
+				.collect(),
+		)
+	}
+
 	fn definition(&self, params: &GotoDefinitionParams) -> Option<GotoDefinitionResponse> {
 		let pos = &params.text_document_position_params;
 		let doc = self.docs.get(&pos.text_document.uri)?;
+		if let Some(import) = doc.import_at(pos.position) {
+			let target = uri::from_path(&self.resolve_import(&pos.text_document.uri, &import.path)?)?;
+			let start = Position::new(0, 0);
+			return Some(GotoDefinitionResponse::Scalar(Location::new(
+				target,
+				lsp_types::Range::new(start, start),
+			)));
+		}
 		let decl = doc.decl_at(pos.position)?;
 		Some(GotoDefinitionResponse::Scalar(Location::new(
 			pos.text_document.uri.clone(),
@@ -275,7 +358,7 @@ impl Server<'_> {
 	}
 }
 
-fn diagnostics(doc: &Document) -> Vec<Diagnostic> {
+fn diagnostics(doc: &Document, resolve_import: impl Fn(&str) -> Option<PathBuf>) -> Vec<Diagnostic> {
 	let syntax = doc.errors.iter().map(|e| Diagnostic {
 		range: doc.range(e.range),
 		// TODO: SyntaxError isn't exported upstream, so `Hint`s can't be told apart.
@@ -299,5 +382,16 @@ fn diagnostics(doc: &Document) -> Vec<Diagnostic> {
 			message: format!("undefined variable `{}`", name.name),
 			..Default::default()
 		});
-	syntax.chain(unresolved).collect()
+	// A warning, since the client's jpath may differ from what the real run uses (`jrsonnet -J`).
+	let missing_imports = imports::imports(&doc.root)
+		.into_iter()
+		.filter(|i| resolve_import(&i.path).is_none())
+		.map(|i| Diagnostic {
+			range: doc.range(i.range),
+			severity: Some(DiagnosticSeverity::WARNING),
+			source: Some("jsonnet-lsp".to_owned()),
+			message: format!("cannot find `{}` in the importing directory or search paths", i.path),
+			..Default::default()
+		});
+	syntax.chain(unresolved).chain(missing_imports).collect()
 }
