@@ -215,3 +215,17 @@ fn merge(mut base: Fields, over: Fields) -> Fields {
 	}
 	base
 }
+
+impl Field {
+	/// The whole `name: value` member this field was declared by.
+	pub fn member(&self) -> Option<SyntaxNode> {
+		let tok = self
+			.doc
+			.root
+			.token_at_offset(self.name_range.start())
+			.find(|t| t.text_range() == self.name_range)?;
+		tok.parent_ancestors().find(|n| {
+			matches!(n.kind(), SyntaxKind::MEMBER_FIELD_NORMAL | SyntaxKind::MEMBER_FIELD_METHOD)
+		})
+	}
+}

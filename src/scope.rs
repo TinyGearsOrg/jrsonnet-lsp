@@ -278,6 +278,22 @@ pub fn visible_at(root: &SyntaxNode, offset: TextSize) -> Vec<Decl> {
 	out
 }
 
+/// What introduced `decl`: the enclosing bind, parameter or `for` spec, with a short label.
+pub fn decl_site(root: &SyntaxNode, decl: &Decl) -> Option<(SyntaxNode, &'static str)> {
+	let tok = root
+		.token_at_offset(decl.range.start())
+		.find(|t| t.text_range() == decl.range)?;
+	tok.parent_ancestors().find_map(|n| {
+		let label = match n.kind() {
+			SyntaxKind::BIND_DESTRUCT | SyntaxKind::BIND_FUNCTION => "local ",
+			SyntaxKind::PARAM => "(parameter) ",
+			SyntaxKind::FOR_SPEC | SyntaxKind::FOR_OBJ_SPEC => "(loop variable) ",
+			_ => return None,
+		};
+		Some((n, label))
+	})
+}
+
 pub fn is_valid_ident(s: &str) -> bool {
 	const KEYWORDS: &[&str] = &[
 		"assert", "else", "error", "false", "for", "function", "if", "import", "importstr",

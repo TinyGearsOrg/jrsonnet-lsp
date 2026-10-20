@@ -14,7 +14,8 @@ use lsp_server::{Connection, ErrorCode, Message, Notification, Request, Response
 use lsp_types::{
 	Diagnostic, DiagnosticSeverity, DidChangeTextDocumentParams, DidCloseTextDocumentParams,
 	CompletionItem, CompletionItemKind, CompletionOptions, CompletionParams, CompletionResponse,
-	DocumentSymbolParams, DocumentSymbolResponse,
+	DocumentSymbolParams, DocumentSymbolResponse, Hover, HoverContents, HoverParams,
+	HoverProviderCapability, MarkupContent, MarkupKind,
 	DocumentLink, DocumentLinkOptions, DocumentLinkParams,
 	DidOpenTextDocumentParams, DocumentFormattingParams, GotoDefinitionParams,
 	GotoDefinitionResponse, InitializeParams, Location, OneOf, Position, PrepareRenameResponse,
@@ -26,7 +27,7 @@ use lsp_types::{
 		PublishDiagnostics,
 	},
 	request::{
-		Completion, DocumentLinkRequest, DocumentSymbolRequest, Formatting, GotoDefinition, PrepareRenameRequest, References, Rename,
+		Completion, DocumentLinkRequest, DocumentSymbolRequest, Formatting, HoverRequest, GotoDefinition, PrepareRenameRequest, References, Rename,
 		Request as _,
 	},
 };
@@ -52,6 +53,7 @@ pub fn run() -> Result<()> {
 			work_done_progress_options: Default::default(),
 		})),
 		document_symbol_provider: Some(OneOf::Left(true)),
+		hover_provider: Some(HoverProviderCapability::Simple(true)),
 		completion_provider: Some(CompletionOptions {
 			trigger_characters: Some(vec![".".to_owned()]),
 			..Default::default()
@@ -194,6 +196,7 @@ impl Server<'_> {
 			DocumentLinkRequest::METHOD => json(self.document_links(&params(&req)?)),
 			Completion::METHOD => json(self.completion(&params(&req)?)),
 			DocumentSymbolRequest::METHOD => json(self.document_symbols(&params(&req)?)),
+			HoverRequest::METHOD => json(self.hover(&params(&req)?)),
 			m => Err((ErrorCode::MethodNotFound, format!("unsupported request {m}"))),
 		}
 	}
@@ -333,6 +336,53 @@ impl Server<'_> {
 				.collect()
 		};
 		Some(CompletionResponse::Array(items))
+	}
+
+	fn hover(&self, params: &HoverParams) -> Option<Hover> {
+		let pos = &params.text_document_position_params;
+		let uri = &pos.text_document.uri;
+		let doc = self.docs.get(uri)?;
+		let code = |s: &str| format!("```jsonnet\n{s}\n```");
+
+		if let Some(import) = doc.import_at(pos.position) {
+			let text = match self.resolve_import(uri, &import.path) {
+				Some(p) => format!("`{}`", p.display()),
+				None => format!("`{}` was not found", import.path),
+			};
+			return Some(hover(doc, import.range, text));
+		}
+
+		let tok = doc.ident_at(pos.position)?;
+		let range = tok.text_range();
+		let name_node = tok.parent()?;
+		if name_node.parent()?.kind() == SyntaxKind::SUFFIX_INDEX {
+			let suffix = name_node.parent()?;
+			if is_std_receiver(&suffix) {
+				let known = stdlib::NAMES.contains(&tok.text());
+				return known.then(|| {
+					hover(doc, range, format!("{}\n\nStandard library member", code(&format!("std.{}", tok.text()))))
+				});
+			}
+			let field = fields::before_suffix(&self.loader(), doc, &suffix)?
+				.into_iter()
+				.find(|f| f.name == tok.text())?;
+			let member = field.member()?;
+			let origin = if field.doc.uri == *uri {
+				String::new()
+			} else {
+				format!("\n\n{}", uri::to_path(&field.doc.uri)?.display())
+			};
+			return Some(hover(doc, range, format!("{}{origin}", code(&snippet(&member)))));
+		}
+
+		match scope::decl_at(&doc.root, &tok)? {
+			Resolution::Std => Some(hover(doc, range, "The Jsonnet standard library".to_owned())),
+			Resolution::Local(decl) => {
+				let (site, label) = scope::decl_site(&doc.root, &decl)?;
+				Some(hover(doc, range, code(&format!("{label}{}", snippet(&site)))))
+			}
+			Resolution::Unresolved => None,
+		}
 	}
 
 	fn document_symbols(&self, params: &DocumentSymbolParams) -> Option<DocumentSymbolResponse> {
@@ -475,4 +525,27 @@ fn is_std_receiver(suffix: &jrsonnet_rowan_parser::SyntaxNode) -> bool {
 	};
 	&first_suffix == suffix
 		&& ExprVar::cast(base).and_then(|v| scope::resolve(&v)) == Some(Resolution::Std)
+}
+
+fn hover(doc: &Document, range: jrsonnet_rowan_parser::rowan::TextRange, markdown: String) -> Hover {
+	Hover {
+		contents: HoverContents::Markup(MarkupContent {
+			kind: MarkupKind::Markdown,
+			value: markdown,
+		}),
+		range: Some(doc.range(range)),
+	}
+}
+
+/// The first line of `node`'s source, cut to a reasonable length, with `…` if anything was dropped.
+fn snippet(node: &jrsonnet_rowan_parser::SyntaxNode) -> String {
+	const MAX: usize = 100;
+	let text = node.text().to_string();
+	let first = text.lines().next().unwrap_or("").trim_end();
+	let cut: String = first.chars().take(MAX).collect();
+	if cut.len() < text.trim_end().len() {
+		format!("{cut} …")
+	} else {
+		cut
+	}
 }

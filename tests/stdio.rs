@@ -354,3 +354,27 @@ fn self_super_and_dollar() {
 	assert_eq!(def(6, 10), json!({"line":2,"character":2}));
 	c.finish();
 }
+
+#[test]
+fn hover() {
+	let mut c = Client::start();
+	c.initialize();
+	let uri = "file:///hover.jsonnet";
+	c.open(uri, "local lib = { foo: 1, bar(x):: x };\nlocal f(a, b) = a + b;\n[lib.foo, lib.bar, f, std.length, std, nope]");
+	let mut id = 0;
+	let mut hover = |line, character| {
+		id += 1;
+		let r = c.request(id, "textDocument/hover", json!({
+			"textDocument":{"uri":uri},"position":{"line":line,"character":character}}));
+		r["result"]["contents"]["value"].as_str().map(str::to_owned)
+	};
+	assert!(hover(2, 19).unwrap().contains("local f(a, b) = a + b"));
+	assert!(hover(1, 16).unwrap().contains("(parameter) a"));
+	assert!(hover(2, 6).unwrap().contains("foo: 1"));
+	assert!(hover(2, 15).unwrap().contains("bar(x):: x"));
+	assert!(hover(2, 28).unwrap().contains("std.length"));
+	assert!(hover(2, 35).unwrap().contains("standard library"));
+	// Undefined names have nothing to show.
+	assert_eq!(hover(2, 41), None);
+	c.finish();
+}
