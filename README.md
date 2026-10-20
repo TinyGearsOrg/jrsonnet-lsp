@@ -37,7 +37,23 @@ warning, since the real run may use different `-J` paths.
 - Signature help, and std documentation in hover
 - Field lookup through array destructuring and `?.[...]` indexing
 - Windows paths
-- Incremental text sync, and hint-level diagnostics once `SyntaxError` is exported upstream
+- Incremental text sync
+
+## Building
+
+jrsonnet is pinned by git rev in `Cargo.toml`, but `.cargo/config.toml` overrides it with a
+sibling checkout at `../jrsonnet`, because the server needs `SyntaxError` exported from
+`jrsonnet-rowan-parser` and the pinned upstream rev doesn't export it yet. Until that lands
+upstream, build with a jrsonnet checkout containing that change next to this repo:
+
+```sh
+git clone https://github.com/deltarocks/jrsonnet ../jrsonnet
+# apply: pub use parser::{ExpectedSyntax, LocatedSyntaxError, SyntaxError}; in
+# crates/jrsonnet-rowan-parser/src/lib.rs
+cargo build
+```
+
+Once it's released, bump the rev in `Cargo.toml` and delete `.cargo/config.toml`.
 
 ## Development
 
@@ -45,7 +61,6 @@ warning, since the real run may use different `-J` paths.
 `cargo run --example dump -- '<jsonnet>'` prints the CST for a snippet, which is handy
 since the parser's tree doesn't always match `jsonnet.ungram`.
 
-jrsonnet is pinned by git rev in `Cargo.toml` because its API is still moving.
 
 ## jrsonnet extensions
 
