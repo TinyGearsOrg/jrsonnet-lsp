@@ -791,3 +791,48 @@ fn fields_through_indexing_and_array_destructuring() {
 	assert!(def(&mut c, col(3, "rest.zzz") + 6).is_null());
 	c.finish();
 }
+
+#[test]
+fn open_buffers_win_over_disk_for_imports() {
+	let ws = std::path::Path::new(env!("CARGO_TARGET_TMPDIR")).join("buffers-ws");
+	let _ = std::fs::remove_dir_all(&ws);
+	std::fs::create_dir_all(&ws).unwrap();
+	std::fs::write(ws.join("lib.libsonnet"), "{ old: 1 }").unwrap();
+	let uri_of = |rel: &str| format!("file://{}", ws.join(rel).display());
+
+	let mut c = Client::start();
+	c.send(
+		json!({"jsonrpc":"2.0","id":0,"method":"initialize","params":{
+		"capabilities":{}, "workspaceFolders":[{"uri":uri_of(""),"name":"ws"}]}}),
+	);
+	c.recv();
+	c.send(json!({"jsonrpc":"2.0","method":"initialized","params":{}}));
+
+	let main = uri_of("main.jsonnet");
+	let src = "[(import 'lib.libsonnet').old, (import 'lib.libsonnet').fresh]";
+	c.open(&main, src);
+	let col = |needle: &str| src.find(needle).unwrap() as u64;
+	let mut id = 0;
+	let mut def = |c: &mut Client, character: u64| {
+		id += 1;
+		c.request(
+			id,
+			"textDocument/definition",
+			json!({
+			"textDocument":{"uri":main},"position":{"line":0,"character":character}}),
+		)["result"]
+			.clone()
+	};
+
+	// From disk, only `old` exists.
+	assert_eq!(def(&mut c, col(".old") + 1)["uri"], uri_of("lib.libsonnet"));
+	assert!(def(&mut c, col(".fresh") + 1).is_null());
+
+	// The unsaved buffer replaces what is on disk.
+	c.open(&uri_of("lib.libsonnet"), "{ fresh: 1 }");
+	assert!(def(&mut c, col(".old") + 1).is_null());
+	let got = def(&mut c, col(".fresh") + 1);
+	assert_eq!(got["uri"], uri_of("lib.libsonnet"));
+	assert_eq!(got["range"]["start"], json!({"line":0,"character":2}));
+	c.finish();
+}

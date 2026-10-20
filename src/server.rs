@@ -165,10 +165,17 @@ impl Files for Loader<'_> {
 	fn import(&self, from: &Document, path: &str) -> Option<Rc<Document>> {
 		let importer = uri::to_path(&from.uri);
 		let target = imports::resolve(importer.as_deref(), path, self.search, Path::is_file)?;
-		let uri = uri::from_path(&target)?;
-		if let Some(open) = self.docs.get(&uri) {
+		// An open buffer wins over the file on disk. Clients spell the same file's URI in
+		// different ways (`c%3A` vs `C:` on Windows), so match by path, not by URI text.
+		let key = uri::path_key(&target);
+		let open = self
+			.docs
+			.values()
+			.find(|d| uri::to_path(&d.uri).is_some_and(|p| uri::path_key(&p) == key));
+		if let Some(open) = open {
 			return Some(open.clone());
 		}
+		let uri = uri::from_path(&target)?;
 		self.cache
 			.borrow_mut()
 			.entry(target.clone())

@@ -41,7 +41,6 @@ warning, since the real run may use different `-J` paths.
 ## Planned
 
 - Prose documentation for `std` functions (only names and parameters are known today)
-- Windows paths
 
 ## Building
 
@@ -78,3 +77,9 @@ destructuring in `local` and parameters (`{a, b: [c, ...rest]}`, `?` skips, defa
 `for [k, v] in obj` comprehensions, and `??` / `?.`. Names, references and rename work in all of
 them, and fields can be followed through object patterns. `std` completion lists whatever
 jrsonnet's own `std` provides, including its additions to the standard library.
+
+## Platforms
+
+Developed and tested on Linux. Windows drive-letter URIs (`file:///c%3A/...` as VS Code sends
+them, or `file:///C:/...`) and path comparison are handled and unit-tested, but the server has not
+been run on Windows. UNC paths (`file://server/share/...`) are not supported.
