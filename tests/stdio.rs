@@ -679,3 +679,64 @@ fn std_signatures() {
 	assert!(pi["detail"].is_null());
 	c.finish();
 }
+
+#[test]
+fn incremental_sync() {
+	let mut c = Client::start();
+	c.send(json!({"jsonrpc":"2.0","id":0,"method":"initialize","params":{"capabilities":{}}}));
+	let init = c.recv();
+	// 2 is TextDocumentSyncKind::Incremental.
+	assert_eq!(init["result"]["capabilities"]["textDocumentSync"], 2);
+	c.send(json!({"jsonrpc":"2.0","method":"initialized","params":{}}));
+
+	let uri = "file:///inc.jsonnet";
+	assert!(
+		c.open(uri, "local a = 1;\na")
+			.as_array()
+			.unwrap()
+			.is_empty()
+	);
+
+	let change = |c: &mut Client, edits: Value| {
+		c.send(
+			json!({"jsonrpc":"2.0","method":"textDocument/didChange","params":{
+			"textDocument":{"uri":uri,"version":2},"contentChanges":edits}}),
+		);
+		c.recv()["params"]["diagnostics"].clone()
+	};
+	let range = |l1, c1, l2, c2| json!({"start":{"line":l1,"character":c1},"end":{"line":l2,"character":c2}});
+
+	// Two edits in one notification; the second one's range refers to the text after the first.
+	let diags = change(
+		&mut c,
+		json!([
+			{"range": range(0, 10, 0, 11), "text": "2000"},
+			{"range": range(1, 0, 1, 1), "text": "b"},
+		]),
+	);
+	let diags = diags.as_array().unwrap();
+	assert_eq!(diags.len(), 1);
+	assert_eq!(diags[0]["message"], "undefined variable `b`");
+	assert_eq!(diags[0]["range"]["start"], json!({"line":1,"character":0}));
+
+	// Fixing it clears the diagnostic, and the earlier edit is still there.
+	let diags = change(&mut c, json!([{"range": range(1, 0, 1, 1), "text": "a"}]));
+	assert!(diags.as_array().unwrap().is_empty());
+	let hover = c.request(
+		1,
+		"textDocument/hover",
+		json!({
+		"textDocument":{"uri":uri},"position":{"line":1,"character":0}}),
+	);
+	assert!(
+		hover["result"]["contents"]["value"]
+			.as_str()
+			.unwrap()
+			.contains("local a = 2000")
+	);
+
+	// A change without a range still replaces the whole text.
+	let diags = change(&mut c, json!([{"text": "nope"}]));
+	assert_eq!(diags[0]["message"], "undefined variable `nope`");
+	c.finish();
+}

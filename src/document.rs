@@ -1,7 +1,7 @@
 use jrsonnet_rowan_parser::{
 	AstNode, LocatedSyntaxError, SyntaxKind, SyntaxNode, SyntaxToken, parse, rowan::TextRange,
 };
-use lsp_types::{Position, Uri};
+use lsp_types::{Position, TextDocumentContentChangeEvent, Uri};
 
 use crate::{
 	imports,
@@ -61,5 +61,83 @@ impl Document {
 			Resolution::Local(d) => Some(d),
 			Resolution::Std | Resolution::Unresolved => None,
 		}
+	}
+}
+
+/// Applies `didChange` events in order; each range refers to the text as the previous events
+/// left it. A change without a range replaces the whole text.
+pub fn apply_changes(mut text: String, changes: Vec<TextDocumentContentChangeEvent>) -> String {
+	for change in changes {
+		let Some(range) = change.range else {
+			text = change.text;
+			continue;
+		};
+		let index = LineIndex::new(&text);
+		// Positions past the end clamp to it.
+		let start = index.offset(&text, range.start).unwrap_or(text.len());
+		let end = index.offset(&text, range.end).unwrap_or(text.len());
+		text.replace_range(start.min(end)..end, &change.text);
+	}
+	text
+}
+
+#[cfg(test)]
+mod tests {
+	use lsp_types::Range;
+
+	use super::*;
+
+	fn edit(l1: u32, c1: u32, l2: u32, c2: u32, text: &str) -> TextDocumentContentChangeEvent {
+		TextDocumentContentChangeEvent {
+			range: Some(Range::new(Position::new(l1, c1), Position::new(l2, c2))),
+			range_length: None,
+			text: text.to_owned(),
+		}
+	}
+
+	#[test]
+	fn replaces_inserts_and_deletes() {
+		assert_eq!(
+			apply_changes("{a: 1}".to_owned(), vec![edit(0, 4, 0, 5, "xyz")]),
+			"{a: xyz}"
+		);
+		assert_eq!(
+			apply_changes("ab".to_owned(), vec![edit(0, 1, 0, 1, "-")]),
+			"a-b"
+		);
+		assert_eq!(
+			apply_changes("a\nb\nc".to_owned(), vec![edit(0, 1, 2, 0, "")]),
+			"ac"
+		);
+	}
+
+	#[test]
+	fn columns_are_utf16() {
+		// In `"é😀" + x` the quote, `é`, `😀` (two units, four bytes), quote, space and `+` are
+		// at columns 0, 1, 2..4, 4, 5 and 6, so columns 5 to 8 are ` + `.
+		let t = apply_changes("\"é😀\" + x".to_owned(), vec![edit(0, 5, 0, 8, "")]);
+		assert_eq!(t, "\"é😀\"x");
+	}
+
+	#[test]
+	fn later_changes_see_earlier_ones() {
+		// `xyz` -> `abcyz`, then columns 3..4 are the `y`.
+		let changes = vec![edit(0, 0, 0, 1, "abc"), edit(0, 3, 0, 4, "Z")];
+		assert_eq!(apply_changes("xyz".to_owned(), changes), "abcZz");
+	}
+
+	#[test]
+	fn whole_text_and_clamping() {
+		let changes = vec![
+			edit(0, 0, 0, 1, "q"),
+			TextDocumentContentChangeEvent {
+				range: None,
+				range_length: None,
+				text: "new".to_owned(),
+			},
+			// A range past the end of the text clamps to the end.
+			edit(5, 0, 9, 9, "!"),
+		];
+		assert_eq!(apply_changes("old".to_owned(), changes), "new!");
 	}
 }

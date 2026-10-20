@@ -33,7 +33,7 @@ use lsp_types::{
 };
 
 use crate::{
-	document::Document,
+	document::{Document, apply_changes},
 	fields::{self, Fields, Files},
 	imports,
 	scope::{self, Resolution},
@@ -43,7 +43,9 @@ use crate::{
 pub fn run() -> Result<()> {
 	let (connection, io_threads) = Connection::stdio();
 	let capabilities = serde_json::to_value(ServerCapabilities {
-		text_document_sync: Some(TextDocumentSyncCapability::Kind(TextDocumentSyncKind::FULL)),
+		text_document_sync: Some(TextDocumentSyncCapability::Kind(
+			TextDocumentSyncKind::INCREMENTAL,
+		)),
 		document_formatting_provider: Some(OneOf::Left(true)),
 		definition_provider: Some(OneOf::Left(true)),
 		references_provider: Some(OneOf::Left(true)),
@@ -258,10 +260,13 @@ impl Server<'_> {
 			}
 			DidChangeTextDocument::METHOD => {
 				let p: DidChangeTextDocumentParams = serde_json::from_value(not.params)?;
-				// Full sync: the last change carries the whole text.
-				if let Some(change) = p.content_changes.into_iter().last() {
-					self.update(p.text_document.uri, change.text)?;
-				}
+				let uri = p.text_document.uri;
+				let base = self
+					.docs
+					.get(&uri)
+					.map(|d| d.text.clone())
+					.unwrap_or_default();
+				self.update(uri, apply_changes(base, p.content_changes))?;
 			}
 			DidChangeWatchedFiles::METHOD => self.refresh_diagnostics()?,
 			DidCloseTextDocument::METHOD => {

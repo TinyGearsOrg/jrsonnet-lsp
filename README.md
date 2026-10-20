@@ -10,6 +10,7 @@ Early work in progress. It talks LSP over stdio: `cargo run`.
 
 - Syntax error diagnostics, and `undefined variable` for names that don't resolve
 - Formatting (via `jrsonnet-formatter`)
+- Incremental text sync (the document is still fully re-parsed on each change)
 - Go to definition, find references, and rename for local variables, function
   parameters, destructured names and comprehension variables
 - `import`, `importstr` and `importbin` paths: go to the imported file, clickable links,
@@ -41,7 +42,6 @@ warning, since the real run may use different `-J` paths.
 - Prose documentation for `std` functions (only names and parameters are known today)
 - Field lookup through array destructuring and `?.[...]` indexing
 - Windows paths
-- Incremental text sync
 
 ## Building
 
