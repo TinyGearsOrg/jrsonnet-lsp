@@ -105,6 +105,33 @@ To try the packaged extension instead: `make package`, then
   `JRSONNET_LSP_SERVER_PATH` runs it against a particular server binary.
 - The server side of the demo is checked by `demo_workspace` in the repository's `tests/stdio.rs`
 
+### Releasing
+
+1. Bump `version` in `package.json`, add it to `CHANGELOG.md` and commit.
+2. Push a tag `vX.Y.Z` that matches the version. The Release workflow builds the packages for every
+   platform, starts the binaries that can run on their runner, and creates a GitHub release with all
+   the VSIXes attached.
+3. **First release, by hand.** Download the VSIXes from that GitHub release and upload them to the
+   Marketplace under the `TinyGears` publisher (the publisher's management page takes one VSIX per
+   target, or use `vsce publish --packagePath` with a token).
+4. **Switch to trusted publishing.** It publishes from GitHub Actions with a short-lived OpenID
+   Connect credential, so no token is stored anywhere. On the Marketplace, add a trusted
+   publishing policy for the repository `TinyGearsOrg/jrsonnet-lsp` and the workflow
+   `.github/workflows/release.yml` (what `vsce` asks for is "a policy for the repository and
+   workflow"; the Marketplace's own pages are the reference for the exact fields). Then set the
+   repository variable `MARKETPLACE_PUBLISH` to `true` (Settings, Secrets and variables, Actions,
+   Variables).
+5. From the next version on, pushing a tag also publishes: the `marketplace` job runs
+   `vsce publish --oidc`. It is the only job that can request an OIDC token, installs only `vsce`
+   without running install scripts, and cannot write to the repository.
+
+Leave `MARKETPLACE_PUBLISH` unset until the version released by hand is no longer the one being
+tagged: the Marketplace refuses a version that already exists, and `vsce` does not fall back to a
+token if the OIDC exchange fails.
+
+Running the Release workflow by hand (Actions, *Run workflow*) builds and packages everything but
+releases and publishes nothing, which is the way to test a change to it.
+
 ### The icon
 
 `images/icon.svg` is the editable source and `images/icon.png` is what ships (VS Code and the
