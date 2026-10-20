@@ -15,8 +15,8 @@ Early work in progress. It talks LSP over stdio: `cargo run`.
 - `import`, `importstr` and `importbin` paths: go to the imported file, clickable links,
   and a warning when the file can't be found
 - Go to definition of `x.field` and completion after `.`, following object literals, `+`,
-  parentheses, `local` names, `import`s and chained fields across files (static, best effort:
-  no calls, conditionals, `self`/`super` or `std`)
+  parentheses, `local` names, `import`s, `self`/`super`/`$` and chained fields across files
+  (static, best effort: no calls, conditionals or `std`)
 - `std.` completion (names taken from jrsonnet's own `std` at the pinned rev), completion of
   variables in scope, and a document outline of top-level locals and object fields
 
@@ -30,7 +30,6 @@ warning, since the real run may use different `-J` paths.
 
 ## Planned
 
-- `self`, `super` and `$` in field lookup
 - Hover (local definitions, std docs) and signature help
 - jrsonnet-specific syntax and builtins beyond what the parser already accepts
 - Re-checking imports when files change on disk, and Windows paths

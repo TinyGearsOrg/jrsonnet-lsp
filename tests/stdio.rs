@@ -328,3 +328,29 @@ fn symbols_and_scope_completion() {
 
 	c.finish();
 }
+
+#[test]
+fn self_super_and_dollar() {
+	let mut c = Client::start();
+	c.initialize();
+	let uri = "file:///keywords.jsonnet";
+	c.open(uri, "{\n  a: 1,\n  b: self.a,\n  nested: { c: $.a, z: 1, d: self.z },\n} + {\n  e: super.a,\n  f: self.b,\n}\n");
+	let mut id = 0;
+	let mut def = |line, character| {
+		id += 1;
+		let r = c.request(id, "textDocument/definition", json!({
+			"textDocument":{"uri":uri},"position":{"line":line,"character":character}}));
+		r["result"]["range"]["start"].clone()
+	};
+	// `self.a` inside the first object.
+	assert_eq!(def(2, 10), json!({"line":1,"character":2}));
+	// `$` is the outermost object even from a nested one.
+	assert_eq!(def(3, 17), json!({"line":1,"character":2}));
+	// `self` is the innermost object.
+	assert_eq!(def(3, 34), json!({"line":3,"character":20}));
+	// `super` in the right operand of `+` is the left operand.
+	assert_eq!(def(5, 11), json!({"line":1,"character":2}));
+	// `self` there also sees what it extends.
+	assert_eq!(def(6, 10), json!({"line":2,"character":2}));
+	c.finish();
+}

@@ -3,8 +3,8 @@
 //!
 //! This follows only what can be known without evaluating: object literals, `+` and object
 //! extension, parentheses, `local` names bound to such expressions, `import`s and chained
-//! `.field` access. Anything else (calls, conditionals, comprehensions, `self`/`super`, `std`)
-//! gives `None` rather than a guess.
+//! `.field` access, plus `self`, `super` and `$` inside object literals. Anything else (calls,
+//! conditionals, comprehensions, `std`) gives `None` rather than a guess.
 
 use std::rc::Rc;
 
@@ -82,6 +82,10 @@ fn base_fields(files: &dyn Files, doc: &Rc<Document>, node: &SyntaxNode, depth: 
 	match node.kind() {
 		SyntaxKind::EXPR_OBJECT => object_fields(doc, &ExprObject::cast(node.clone())?),
 		SyntaxKind::EXPR_PARENED => sub(ExprParened::cast(node.clone())?.expr()),
+		SyntaxKind::EXPR_LITERAL => {
+			let kw = node.first_token()?.kind();
+			keyword_fields(files, doc, node, kw, depth)
+		}
 		SyntaxKind::EXPR_OBJ_EXTEND => {
 			let ext = ExprObjExtend::cast(node.clone())?;
 			Some(merge(sub(ext.lhs())?, sub(ext.rhs())?))
@@ -116,6 +120,48 @@ fn base_fields(files: &dyn Files, doc: &Rc<Document>, node: &SyntaxNode, depth: 
 			let value = scope::decl_value(&doc.root, &decl)?;
 			eval(files, doc, &value, None, depth + 1)
 		}
+		_ => None,
+	}
+}
+
+/// The left side of `lhs + {...}` / `lhs {...}` when the object literal `obj` is its right side.
+/// That is what `super` refers to inside `obj`, and `self` also includes it.
+fn super_expr(obj: &SyntaxNode) -> Option<SyntaxNode> {
+	let wrapper = obj.parent().filter(|p| p.kind() == SyntaxKind::EXPR)?;
+	// `{...}.x` or `local ...; {...}` are not the object itself.
+	if wrapper.children().count() != 1 {
+		return None;
+	}
+	let container = wrapper.parent()?;
+	let combines = match container.kind() {
+		SyntaxKind::EXPR_OBJ_EXTEND => true,
+		SyntaxKind::EXPR_BINARY => container
+			.children_with_tokens()
+			.any(|e| e.kind() == SyntaxKind::PLUS),
+		_ => false,
+	};
+	let mut exprs = container.children().filter(|c| c.kind() == SyntaxKind::EXPR);
+	let (lhs, rhs) = (exprs.next()?, exprs.next()?);
+	(combines && rhs == wrapper).then_some(lhs)
+}
+
+/// Fields of the object literal `obj` as seen by `self`: its own plus those it extends.
+fn self_fields(files: &dyn Files, doc: &Rc<Document>, obj: &SyntaxNode, depth: u8) -> Option<Fields> {
+	let own = object_fields(doc, &ExprObject::cast(obj.clone())?)?;
+	let inherited = super_expr(obj)
+		.and_then(|lhs| eval(files, doc, &lhs, None, depth + 1))
+		.unwrap_or_default();
+	Some(merge(inherited, own))
+}
+
+/// `self`, `super` and `$` in the object literals that enclose `node`.
+fn keyword_fields(files: &dyn Files, doc: &Rc<Document>, node: &SyntaxNode, kw: SyntaxKind, depth: u8) -> Option<Fields> {
+	let mut objects = node.ancestors().filter(|n| n.kind() == SyntaxKind::EXPR_OBJECT);
+	match kw {
+		SyntaxKind::SELF_KW => self_fields(files, doc, &objects.next()?, depth),
+		SyntaxKind::SUPER_KW => eval(files, doc, &super_expr(&objects.next()?)?, None, depth + 1),
+		// `$` is the outermost enclosing object.
+		SyntaxKind::DOLLAR => self_fields(files, doc, &objects.last()?, depth),
 		_ => None,
 	}
 }
