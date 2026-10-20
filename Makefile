@@ -3,6 +3,11 @@
 
 EXT := extension
 
+# What `make init` sets up. Targets that need them depend on these files, so they also work on a
+# checkout where `make init` was never run (or ran before the dependencies changed).
+JRSONNET := .jrsonnet/.stamp
+NPM := $(EXT)/node_modules/.package-lock.json
+
 .DEFAULT_GOAL := help
 .PHONY: help init build build-server build-extension test test-server test-extension \
 	test-integration lint fmt gen-stdlib bundle package clean
@@ -12,30 +17,36 @@ help: ## Show this help
 		printf '  %-16s %s\n' "$${line%%:*}" "$${line##*## }"; \
 	done
 
-init: ## Set up a fresh checkout: patched jrsonnet sources and the extension's npm packages
+$(JRSONNET): scripts/setup-jrsonnet.sh Cargo.toml $(wildcard patches/*.patch)
 	./scripts/setup-jrsonnet.sh
+	@touch $@
+
+$(NPM): $(EXT)/package.json $(EXT)/package-lock.json
 	cd $(EXT) && npm ci
+	@touch $@
+
+init: $(JRSONNET) $(NPM) ## Prepare a fresh checkout: patched jrsonnet sources and the extension's npm packages
 
 build: build-server build-extension ## Build the server (release) and the extension
 
-build-server: ## Build the language server in release mode
+build-server: $(JRSONNET) ## Build the language server in release mode
 	cargo build --release
 
-build-extension: ## Bundle the extension's TypeScript
+build-extension: $(NPM) ## Bundle the extension's TypeScript
 	cd $(EXT) && npm run compile
 
 test: test-server test-extension ## Run all tests
 
-test-server: ## Run the server's unit and end-to-end tests
+test-server: $(JRSONNET) ## Run the server's unit and end-to-end tests
 	cargo test
 
-test-extension: ## Type-check the extension and run its tests
+test-extension: $(NPM) ## Type-check the extension and run its tests
 	cd $(EXT) && npm run typecheck && npm test
 
 test-integration: build-server build-extension ## Run the extension in a real VS Code (downloads VS Code; needs a display, e.g. xvfb-run)
 	cd $(EXT) && npm run test:integration
 
-lint: ## Check formatting and run clippy, treating warnings as errors
+lint: $(JRSONNET) $(NPM) ## Check formatting and run clippy, treating warnings as errors
 	cargo fmt --check
 	cargo clippy --all-targets -- -D warnings
 	cd $(EXT) && npm run typecheck
