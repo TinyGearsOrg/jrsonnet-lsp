@@ -21,6 +21,8 @@ Early work in progress. It talks LSP over stdio: `cargo run`.
   such as `local {foo, nested: {deep}} = lib;`
 - Hover: a local's binding, a field's declaration (also across files), `std` members by name,
   and where an import path resolves to
+- Signature help for calls to `local` functions and to methods or function-valued fields found
+  through the same lookup, highlighting the active parameter (by position or `name =`)
 - `std.` completion (names taken from jrsonnet's own `std` at the pinned rev), completion of
   variables in scope, and a document outline of top-level locals and object fields
 
@@ -34,7 +36,7 @@ warning, since the real run may use different `-J` paths.
 
 ## Planned
 
-- Signature help, and std documentation in hover
+- std documentation in hover, and signature help for `std` functions
 - Field lookup through array destructuring and `?.[...]` indexing
 - Windows paths
 - Incremental text sync

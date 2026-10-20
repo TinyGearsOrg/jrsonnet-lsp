@@ -566,3 +566,53 @@ fn fields_through_destructuring() {
 	assert_eq!(labels, ["bar"]);
 	c.finish();
 }
+
+#[test]
+fn signature_help() {
+	let mut c = Client::start();
+	c.initialize();
+	let uri = "file:///sig.jsonnet";
+	let l0 = "local f(a, b = 2) = a;";
+	let l1 = "local lib = { m(x, y):: x, g: function(p, q) p };";
+	let l2 = "f(1, 2) + lib.m(1, 2) + lib.g(1, 2) + f(b = 5, a = 1) + f(1,";
+	c.open(uri, &format!("{l0}\n{l1}\n{l2}"));
+	let col = |needle: &str| l2.find(needle).unwrap() as u64;
+
+	let mut id = 0;
+	let mut sig = |c: &mut Client, character: u64| {
+		id += 1;
+		let r = c.request(
+			id,
+			"textDocument/signatureHelp",
+			json!({
+			"textDocument":{"uri":uri},"position":{"line":2,"character":character}}),
+		);
+		r["result"].clone()
+	};
+
+	// A local function: right after `(`, then after the comma.
+	let r = sig(&mut c, col("f(1, 2)") + 2);
+	assert_eq!(r["signatures"][0]["label"], "f(a, b = 2)");
+	assert_eq!(r["signatures"][0]["parameters"][0]["label"], json!([2, 3]));
+	assert_eq!(r["signatures"][0]["parameters"][1]["label"], json!([5, 10]));
+	assert_eq!(r["activeParameter"], 0);
+	assert_eq!(sig(&mut c, col("1, 2)") + 3)["activeParameter"], 1);
+
+	// Fields: a method, and a field whose value is a function.
+	let r = sig(&mut c, col("m(1") + 2);
+	assert_eq!(r["signatures"][0]["label"], "m(x, y)");
+	let r = sig(&mut c, col("g(1") + 2);
+	assert_eq!(r["signatures"][0]["label"], "g(p, q)");
+
+	// Named arguments pick their parameter, whatever the position.
+	assert_eq!(sig(&mut c, col("5, a") + 1)["activeParameter"], 1);
+	assert_eq!(sig(&mut c, col("1)") + 1)["activeParameter"], 0);
+
+	// An unterminated call still works, with the cursor after the last comma.
+	assert_eq!(sig(&mut c, l2.len() as u64)["activeParameter"], 1);
+
+	// Not inside a call: on the operator, and right after the closing paren.
+	assert!(sig(&mut c, col(" + lib") + 1).is_null());
+	assert!(sig(&mut c, col("f(1, 2)") + 7).is_null());
+	c.finish();
+}

@@ -17,17 +17,18 @@ use lsp_types::{
 	DocumentLinkParams, DocumentSymbolParams, DocumentSymbolResponse, FileSystemWatcher,
 	GlobPattern, GotoDefinitionParams, GotoDefinitionResponse, Hover, HoverContents, HoverParams,
 	HoverProviderCapability, InitializeParams, Location, MarkupContent, MarkupKind, OneOf,
-	Position, PrepareRenameResponse, PublishDiagnosticsParams, ReferenceParams, Registration,
-	RegistrationParams, RenameOptions, RenameParams, ServerCapabilities,
-	TextDocumentPositionParams, TextDocumentSyncCapability, TextDocumentSyncKind, TextEdit, Uri,
-	WorkspaceEdit,
+	ParameterInformation, ParameterLabel, Position, PrepareRenameResponse,
+	PublishDiagnosticsParams, ReferenceParams, Registration, RegistrationParams, RenameOptions,
+	RenameParams, ServerCapabilities, SignatureHelp, SignatureHelpOptions, SignatureHelpParams,
+	SignatureInformation, TextDocumentPositionParams, TextDocumentSyncCapability,
+	TextDocumentSyncKind, TextEdit, Uri, WorkspaceEdit,
 	notification::{
 		DidChangeTextDocument, DidChangeWatchedFiles, DidCloseTextDocument, DidOpenTextDocument,
 		Notification as _, PublishDiagnostics,
 	},
 	request::{
 		Completion, DocumentLinkRequest, DocumentSymbolRequest, Formatting, GotoDefinition,
-		HoverRequest, PrepareRenameRequest, References, Rename, Request as _,
+		HoverRequest, PrepareRenameRequest, References, Rename, Request as _, SignatureHelpRequest,
 	},
 };
 
@@ -36,7 +37,7 @@ use crate::{
 	fields::{self, Fields, Files},
 	imports,
 	scope::{self, Resolution},
-	stdlib, symbols, uri,
+	signature, stdlib, symbols, uri,
 };
 
 pub fn run() -> Result<()> {
@@ -52,6 +53,10 @@ pub fn run() -> Result<()> {
 		})),
 		document_symbol_provider: Some(OneOf::Left(true)),
 		hover_provider: Some(HoverProviderCapability::Simple(true)),
+		signature_help_provider: Some(SignatureHelpOptions {
+			trigger_characters: Some(vec!["(".to_owned(), ",".to_owned()]),
+			..Default::default()
+		}),
 		completion_provider: Some(CompletionOptions {
 			trigger_characters: Some(vec![".".to_owned()]),
 			..Default::default()
@@ -237,6 +242,7 @@ impl Server<'_> {
 			Completion::METHOD => json(self.completion(&params(&req)?)),
 			DocumentSymbolRequest::METHOD => json(self.document_symbols(&params(&req)?)),
 			HoverRequest::METHOD => json(self.hover(&params(&req)?)),
+			SignatureHelpRequest::METHOD => json(self.signature_help(&params(&req)?)),
 			m => Err((
 				ErrorCode::MethodNotFound,
 				format!("unsupported request {m}"),
@@ -455,6 +461,33 @@ impl Server<'_> {
 			}
 			Resolution::Unresolved => None,
 		}
+	}
+
+	fn signature_help(&self, params: &SignatureHelpParams) -> Option<SignatureHelp> {
+		let pos = &params.text_document_position_params;
+		let doc = self.docs.get(&pos.text_document.uri)?;
+		let offset = doc.offset(pos.position)?.into();
+		let args = signature::args_at(doc, offset)?;
+		let sig = signature::signature(&self.loader(), doc, &args)?;
+		let active = signature::active_param(&args, offset, &sig);
+		Some(SignatureHelp {
+			signatures: vec![SignatureInformation {
+				label: sig.label,
+				documentation: None,
+				parameters: Some(
+					sig.params
+						.into_iter()
+						.map(|(start, end)| ParameterInformation {
+							label: ParameterLabel::LabelOffsets([start, end]),
+							documentation: None,
+						})
+						.collect(),
+				),
+				active_parameter: active,
+			}],
+			active_signature: Some(0),
+			active_parameter: active,
+		})
 	}
 
 	fn document_symbols(&self, params: &DocumentSymbolParams) -> Option<DocumentSymbolResponse> {
