@@ -1,7 +1,8 @@
-# Use a sibling jrsonnet checkout (`../jrsonnet`, on a branch that exports `SyntaxError`, which
-# the pinned upstream rev does not) instead of the pinned rev. Paths are relative to this repo.
-# Drop this once the export is released upstream and the pin in Cargo.toml is bumped.
+# Use `.jrsonnet/` (jrsonnet at the pinned rev plus `patches/`, see scripts/setup-jrsonnet.sh)
+# instead of the plain git dependency, since the pinned upstream rev does not export
+# `SyntaxError`. Paths are relative to this repo. Drop this, the script and the patches once the
+# export is released upstream and the pin in Cargo.toml is bumped.
 [patch."https://github.com/deltarocks/jrsonnet"]
-jrsonnet-lexer = { path = "../jrsonnet/crates/jrsonnet-lexer" }
-jrsonnet-rowan-parser = { path = "../jrsonnet/crates/jrsonnet-rowan-parser" }
-jrsonnet-formatter = { path = "../jrsonnet/crates/jrsonnet-formatter" }
+jrsonnet-lexer = { path = ".jrsonnet/crates/jrsonnet-lexer" }
+jrsonnet-rowan-parser = { path = ".jrsonnet/crates/jrsonnet-rowan-parser" }
+jrsonnet-formatter = { path = ".jrsonnet/crates/jrsonnet-formatter" }

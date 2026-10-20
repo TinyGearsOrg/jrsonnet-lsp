@@ -41,19 +41,20 @@ warning, since the real run may use different `-J` paths.
 
 ## Building
 
-jrsonnet is pinned by git rev in `Cargo.toml`, but `.cargo/config.toml` overrides it with a
-sibling checkout at `../jrsonnet`, because the server needs `SyntaxError` exported from
-`jrsonnet-rowan-parser` and the pinned upstream rev doesn't export it yet. Until that lands
-upstream, build with a jrsonnet checkout containing that change next to this repo:
+The server needs `SyntaxError` exported from `jrsonnet-rowan-parser`, which the pinned jrsonnet
+rev doesn't do yet. `patches/export-syntax-error.patch` adds the export, and
+`.cargo/config.toml` points the jrsonnet crates at a patched checkout in `.jrsonnet/`. Cargo
+can't create that before resolving dependencies, so run the setup script first:
 
 ```sh
-git clone https://github.com/deltarocks/jrsonnet ../jrsonnet
-# apply: pub use parser::{ExpectedSyntax, LocatedSyntaxError, SyntaxError}; in
-# crates/jrsonnet-rowan-parser/src/lib.rs
+./scripts/setup-jrsonnet.sh   # fetches jrsonnet at the pinned rev and applies patches/
 cargo build
 ```
 
-Once it's released, bump the rev in `Cargo.toml` and delete `.cargo/config.toml`.
+Run the script again after bumping the rev in `Cargo.toml` or changing a patch; it does nothing
+when `.jrsonnet/` is already current. Set `JRSONNET_URL` to fetch from a mirror or a fork. Once the
+export is released upstream, bump the rev and delete the script, `patches/` and
+`.cargo/config.toml`.
 
 ## Development
 
