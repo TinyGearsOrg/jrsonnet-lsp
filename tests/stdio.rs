@@ -836,3 +836,144 @@ fn open_buffers_win_over_disk_for_imports() {
 	assert_eq!(got["range"]["start"], json!({"line":0,"character":2}));
 	c.finish();
 }
+
+/// The demo workspace that the VS Code extension's README walks through: every claim made there
+/// is checked here, so the demo can't silently rot.
+#[test]
+fn demo_workspace() {
+	let demo = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("editors/vscode/demo");
+	let uri_of = |rel: &str| format!("file://{}", demo.join(rel).display());
+	let main_text = std::fs::read_to_string(demo.join("main.jsonnet")).unwrap();
+	let util_text = std::fs::read_to_string(demo.join("lib/util.libsonnet")).unwrap();
+
+	let mut c = Client::start();
+	c.send(
+		json!({"jsonrpc":"2.0","id":0,"method":"initialize","params":{
+		"capabilities":{}, "workspaceFolders":[{"uri":uri_of(""),"name":"demo"}]}}),
+	);
+	c.recv();
+	c.send(json!({"jsonrpc":"2.0","method":"initialized","params":{}}));
+
+	let main = uri_of("main.jsonnet");
+	let diags = c.open(&main, &main_text);
+	let diags = diags.as_array().unwrap();
+	let messages: Vec<_> = diags
+		.iter()
+		.map(|d| {
+			(
+				d["severity"].as_i64().unwrap(),
+				d["message"].as_str().unwrap(),
+			)
+		})
+		.collect();
+	assert_eq!(messages.len(), 2, "{messages:?}");
+	assert!(
+		messages
+			.iter()
+			.any(|(sev, m)| *sev == 2 && m.contains("nope.libsonnet"))
+	);
+	assert!(
+		messages
+			.iter()
+			.any(|(sev, m)| *sev == 1 && m.contains("undefinedVariable"))
+	);
+
+	// `(line, column)` of `needle` in `text`, plus an offset into the needle.
+	let at = |text: &str, needle: &str, delta: usize| {
+		let offset = text.find(needle).unwrap_or_else(|| panic!("no {needle:?}")) + delta;
+		let line = text[..offset].matches('\n').count();
+		let col = offset - text[..offset].rfind('\n').map_or(0, |n| n + 1);
+		(line as u64, col as u64)
+	};
+	let mut id = 0;
+	let mut request = |c: &mut Client, method: &str, (line, character): (u64, u64)| {
+		id += 1;
+		c.request(
+			id,
+			method,
+			json!({
+			"textDocument":{"uri":main},"position":{"line":line,"character":character}}),
+		)["result"]
+			.clone()
+	};
+
+	// Signature help: a local, a destructured local, and `std`.
+	let sig = |r: &Value| r["signatures"][0]["label"].as_str().unwrap().to_owned();
+	assert_eq!(
+		sig(&request(
+			&mut c,
+			"textDocument/signatureHelp",
+			at(&main_text, "add(1", 4)
+		)),
+		"add(a, b = 1)"
+	);
+	assert_eq!(
+		sig(&request(
+			&mut c,
+			"textDocument/signatureHelp",
+			at(&main_text, "greet(name)", 6)
+		)),
+		"greet(name)"
+	);
+	assert_eq!(
+		sig(&request(
+			&mut c,
+			"textDocument/signatureHelp",
+			at(&main_text, "length(", 7)
+		)),
+		"std.length(x)"
+	);
+
+	// Definitions: into the library, through `self` (the innermost object), and `$` (the outermost).
+	let def = request(
+		&mut c,
+		"textDocument/definition",
+		at(&main_text, "'config']", 2),
+	);
+	assert_eq!(def["uri"], uri_of("lib/util.libsonnet"));
+	let (line, col) = at(&util_text, "config:", 0);
+	assert_eq!(def["range"]["start"], json!({"line":line,"character":col}));
+	let def = request(
+		&mut c,
+		"textDocument/definition",
+		at(&main_text, "].name", 2),
+	);
+	assert_eq!(def["uri"], uri_of("lib/util.libsonnet"));
+	let (line, col) = at(&util_text, "name: 'world'", 0);
+	assert_eq!(def["range"]["start"], json!({"line":line,"character":col}));
+	let def = request(
+		&mut c,
+		"textDocument/definition",
+		at(&main_text, "self.again", 6),
+	);
+	assert_eq!(def["uri"], main);
+	let (line, col) = at(&main_text, "again:", 0);
+	assert_eq!(def["range"]["start"], json!({"line":line,"character":col}));
+	let def = request(
+		&mut c,
+		"textDocument/definition",
+		at(&main_text, "$.total", 3),
+	);
+	let (line, col) = at(&main_text, "total:", 0);
+	assert_eq!(def["range"]["start"], json!({"line":line,"character":col}));
+
+	// The import path opens the file, and hover shows where it resolves to.
+	let def = request(
+		&mut c,
+		"textDocument/definition",
+		at(&main_text, "'lib/util.libsonnet'", 3),
+	);
+	assert_eq!(def["uri"], uri_of("lib/util.libsonnet"));
+	let hover = request(
+		&mut c,
+		"textDocument/hover",
+		at(&main_text, "greet(name)", 2),
+	);
+	assert!(
+		hover["contents"]["value"]
+			.as_str()
+			.unwrap()
+			.contains("greet")
+	);
+	c.finish();
+}

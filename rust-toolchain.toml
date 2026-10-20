@@ -1,0 +1,5 @@
+# Always the latest stable compiler: rustup installs or updates it on first use.
+[toolchain]
+channel = "stable"
+profile = "minimal"
+components = ["rustfmt", "clippy", "rust-analyzer", "rust-src"]

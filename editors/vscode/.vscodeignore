@@ -1,0 +1,11 @@
+# Only what the extension needs at runtime ships: out/extension.js (bundled), server/, the
+# grammar, the language configuration and the docs.
+**
+!package.json
+!README.md
+!CHANGELOG.md
+!LICENSE
+!language-configuration.json
+!syntaxes/**
+!out/extension.js
+!server/**

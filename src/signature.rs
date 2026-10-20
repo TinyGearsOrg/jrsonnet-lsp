@@ -149,7 +149,7 @@ fn callee(
 	let prev = parts.get(i.checked_sub(1)?)?;
 
 	match prev.kind() {
-		SyntaxKind::EXPR_VAR if i == 1 => local_function(doc, &ExprVar::cast(prev.clone())?),
+		SyntaxKind::EXPR_VAR if i == 1 => local_function(files, doc, &ExprVar::cast(prev.clone())?),
 		SyntaxKind::SUFFIX_INDEX => {
 			let name = prev
 				.children()
@@ -159,17 +159,18 @@ fn callee(
 			let field = fields::before_suffix(files, doc, prev)?
 				.into_iter()
 				.find(|f| f.name == name)?;
-			let params = match field.member()? {
-				m if m.kind() == SyntaxKind::MEMBER_FIELD_METHOD => params_desc(&m)?,
-				_ => params_of_value(field.value.as_ref()?)?,
-			};
+			let params = field_params(&field)?;
 			Some((name, params))
 		}
 		_ => None,
 	}
 }
 
-fn local_function(doc: &Document, var: &ExprVar) -> Option<(String, SyntaxNode)> {
+fn local_function(
+	files: &dyn Files,
+	doc: &Rc<Document>,
+	var: &ExprVar,
+) -> Option<(String, SyntaxNode)> {
 	let Resolution::Local(decl) = scope::resolve(var)? else {
 		return None;
 	};
@@ -178,14 +179,24 @@ fn local_function(doc: &Document, var: &ExprVar) -> Option<(String, SyntaxNode)>
 		SyntaxKind::BIND_FUNCTION => params_desc(&site)?,
 		SyntaxKind::BIND_DESTRUCT => {
 			let (value, path) = scope::decl_source(&doc.root, &decl)?;
-			if !path.is_empty() {
-				return None;
+			if path.is_empty() {
+				params_of_value(&value)?
+			} else {
+				// `local {greet} = lib;`: the function is a field of the destructured object.
+				field_params(&fields::destructured_field(files, doc, &decl)?)?
 			}
-			params_of_value(&value)?
 		}
 		_ => return None,
 	};
 	Some((decl.name, params))
+}
+
+/// The parameters of a field that is a method or has a function literal as its value.
+fn field_params(field: &fields::Field) -> Option<SyntaxNode> {
+	match field.member()? {
+		m if m.kind() == SyntaxKind::MEMBER_FIELD_METHOD => params_desc(&m),
+		_ => params_of_value(field.value.as_ref()?),
+	}
 }
 
 fn params_desc(node: &SyntaxNode) -> Option<SyntaxNode> {

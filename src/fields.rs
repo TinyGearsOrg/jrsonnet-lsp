@@ -149,6 +149,27 @@ pub fn before_suffix(files: &dyn Files, doc: &Rc<Document>, suffix: &SyntaxNode)
 	eval(files, doc, &suffix.parent()?, Some(suffix), 0)
 }
 
+/// The field that a `local` name stands for when it was bound by object destructuring, such as
+/// `greet` in `local {greet} = lib;` or `x` in `local {a: {b: x}} = lib;`.
+pub fn destructured_field(
+	files: &dyn Files,
+	doc: &Rc<Document>,
+	decl: &scope::Decl,
+) -> Option<Field> {
+	let (value, mut path) = scope::decl_source(&doc.root, decl)?;
+	let Some(Step::Field(name)) = path.pop() else {
+		return None;
+	};
+	let mut shape = eval_shape(files, doc, &value, None, 1)?;
+	for s in &path {
+		shape = step(files, shape, s, 0)?;
+	}
+	let Shape::Object(fields) = shape else {
+		return None;
+	};
+	fields.into_iter().find(|f| f.name == name)
+}
+
 fn base_shape(
 	files: &dyn Files,
 	doc: &Rc<Document>,

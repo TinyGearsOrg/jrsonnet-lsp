@@ -14,3 +14,6 @@ serde_json = "1"
 # Pinned: jrsonnet is pre-1.0 and its CST/AST API moves.
 jrsonnet-rowan-parser = { git = "https://github.com/deltarocks/jrsonnet", rev = "0648267066e6c135477933c792285de74184e9cb" }
 jrsonnet-formatter = { git = "https://github.com/deltarocks/jrsonnet", rev = "0648267066e6c135477933c792285de74184e9cb" }
+
+[profile.release]
+strip = true

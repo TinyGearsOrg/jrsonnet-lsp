@@ -1,0 +1,121 @@
+{
+  "name": "jrsonnet-lsp",
+  "displayName": "Jsonnet (jrsonnet-lsp)",
+  "description": "Jsonnet language support powered by a language server built on jrsonnet",
+  "version": "0.0.1",
+  "publisher": "tinygearsorg",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/TinyGearsOrg/jrsonnet-lsp.git",
+    "directory": "editors/vscode"
+  },
+  "engines": {
+    "vscode": "^1.91.0"
+  },
+  "categories": [
+    "Programming Languages",
+    "Formatters"
+  ],
+  "keywords": [
+    "jsonnet",
+    "libsonnet",
+    "jrsonnet",
+    "language server"
+  ],
+  "main": "./out/extension.js",
+  "activationEvents": [
+    "onLanguage:jsonnet"
+  ],
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "supported": true
+    }
+  },
+  "contributes": {
+    "languages": [
+      {
+        "id": "jsonnet",
+        "aliases": [
+          "Jsonnet",
+          "jsonnet"
+        ],
+        "extensions": [
+          ".jsonnet",
+          ".libsonnet",
+          ".libjsonnet"
+        ],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "jsonnet",
+        "scopeName": "source.jsonnet",
+        "path": "./syntaxes/jsonnet.tmLanguage.json"
+      }
+    ],
+    "configuration": {
+      "title": "Jsonnet (jrsonnet-lsp)",
+      "properties": {
+        "jrsonnet-lsp.server.path": {
+          "type": "string",
+          "default": "",
+          "scope": "machine",
+          "markdownDescription": "Path to a `jsonnet-lsp` binary to use instead of the one bundled with the extension. Must be an absolute path (a leading `~/` is expanded). Can only be set in user settings, since it decides which program gets run."
+        },
+        "jrsonnet-lsp.jpath": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "markdownDescription": "Extra directories to look imports up in, after the importing file's own directory, the workspace folders and their `vendor/` and `lib/` directories. Relative entries are relative to the first workspace folder. Same idea as `jrsonnet -J`."
+        },
+        "jrsonnet-lsp.trace.server": {
+          "type": "string",
+          "enum": [
+            "off",
+            "messages",
+            "verbose"
+          ],
+          "default": "off",
+          "description": "Traces the communication between VS Code and the language server in the Jsonnet Language Server output channel."
+        }
+      }
+    },
+    "commands": [
+      {
+        "command": "jrsonnet-lsp.restartServer",
+        "title": "Restart Language Server",
+        "category": "Jsonnet"
+      },
+      {
+        "command": "jrsonnet-lsp.showServerLog",
+        "title": "Show Language Server Output",
+        "category": "Jsonnet"
+      }
+    ]
+  },
+  "scripts": {
+    "compile": "node esbuild.mjs",
+    "watch": "node esbuild.mjs --watch",
+    "typecheck": "tsc --noEmit",
+    "test": "node --test \"test/*.test.ts\"",
+    "bundle-server": "node scripts/bundle-server.mjs",
+    "package": "vsce package --no-dependencies --target ${npm_config_target:-linux-x64}",
+    "vscode:prepublish": "npm run typecheck && npm run compile"
+  },
+  "dependencies": {
+    "vscode-languageclient": "10.1.2"
+  },
+  "devDependencies": {
+    "@types/node": "22.20.4",
+    "@types/vscode": "1.91.0",
+    "@vscode/vsce": "4.0.0",
+    "esbuild": "0.28.2",
+    "typescript": "6.0.3",
+    "vscode-oniguruma": "2.0.1",
+    "vscode-textmate": "9.3.2"
+  }
+}
