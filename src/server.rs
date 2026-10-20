@@ -34,7 +34,7 @@ use lsp_types::{
 
 use crate::{
 	document::{Document, apply_changes},
-	fields::{self, Fields, Files},
+	fields::{self, Files},
 	imports,
 	scope::{self, Resolution},
 	signature, stdlib, symbols, uri,
@@ -368,12 +368,6 @@ impl Server<'_> {
 			.find(|n| n.kind() == SyntaxKind::SUFFIX_INDEX)
 	}
 
-	/// Fields of the object that the `.name` under the cursor is being looked up in.
-	fn fields_at(&self, doc: &Rc<Document>, pos: Position) -> Option<Fields> {
-		let suffix = Self::suffix_index_at(doc, pos)?;
-		fields::before_suffix(&self.loader(), doc, &suffix)
-	}
-
 	fn completion(&self, params: &CompletionParams) -> Option<CompletionResponse> {
 		let pos = &params.text_document_position;
 		let doc = self.docs.get(&pos.text_document.uri)?;
@@ -507,18 +501,32 @@ impl Server<'_> {
 		Some(DocumentSymbolResponse::Nested(symbols::symbols(doc)))
 	}
 
-	/// Go to the declaration of the field named by the identifier under the cursor in `x.name`.
+	/// Go to the declaration of the field named in `x.name` or `x["name"]`.
 	fn field_definition(&self, doc: &Rc<Document>, pos: Position) -> Option<Location> {
-		let tok = doc.ident_at(pos)?;
-		let name = tok.parent()?;
-		// Only the name of a `.name` suffix, not the object expression before it.
-		if name.parent()?.kind() != SyntaxKind::SUFFIX_INDEX {
-			return None;
-		}
-		let field = self
-			.fields_at(doc, pos)?
+		let offset = doc.offset(pos)?;
+		let (suffix, name) =
+			doc.root
+				.token_at_offset(offset.into())
+				.find_map(|tok| match tok.kind() {
+					// Only the name of a `.name` suffix, not the object expression before it.
+					SyntaxKind::IDENT => {
+						let suffix = tok.parent()?.parent()?;
+						(suffix.kind() == SyntaxKind::SUFFIX_INDEX)
+							.then(|| (suffix, tok.text().to_owned()))
+					}
+					SyntaxKind::STRING_DOUBLE | SyntaxKind::STRING_SINGLE => {
+						// The string must be the whole index expression of `x[...]`.
+						let expr = tok.parent()?.parent()?;
+						let suffix = expr.parent()?;
+						(suffix.kind() == SyntaxKind::SUFFIX_INDEX_EXPR).then_some(())?;
+						let name = imports::string_value(tok.kind(), tok.text())?;
+						Some((suffix, name))
+					}
+					_ => None,
+				})?;
+		let field = fields::before_suffix(&self.loader(), doc, &suffix)?
 			.into_iter()
-			.find(|f| f.name == tok.text())?;
+			.find(|f| f.name == name)?;
 		Some(Location::new(
 			field.doc.uri.clone(),
 			field.doc.range(field.name_range),

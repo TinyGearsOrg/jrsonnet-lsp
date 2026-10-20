@@ -740,3 +740,54 @@ fn incremental_sync() {
 	assert_eq!(diags[0]["message"], "undefined variable `nope`");
 	c.finish();
 }
+
+#[test]
+fn fields_through_indexing_and_array_destructuring() {
+	let mut c = Client::start();
+	c.initialize();
+	let uri = "file:///index.jsonnet";
+	let lines = [
+		"local lib = { a: { x: 1 }, 'b-c': { y: 2 }, list: [{ p: 1 }, { q: 2 }] };",
+		"local [first, second] = lib.list;",
+		"local [h, ...rest] = [{ m: 1 }, { n: 2 }];",
+		"[lib[\"a\"].x, lib?.[\"b-c\"].y, lib.list[1].q, first.p, second.q, h.m, rest.zzz]",
+	];
+	c.open(uri, &lines.join("\n"));
+
+	let col = |line: usize, needle: &str| lines[line].find(needle).unwrap() as u64;
+	let mut id = 0;
+	let mut def = |c: &mut Client, character: u64| {
+		id += 1;
+		let r = c.request(
+			id,
+			"textDocument/definition",
+			json!({
+			"textDocument":{"uri":uri},"position":{"line":3,"character":character}}),
+		);
+		r["result"].clone()
+	};
+	let at = |line: u64, character: u64| json!({"line":line,"character":character});
+
+	let cases = [
+		// (cursor in line 3, declaration line, declaration needle)
+		(col(3, ".x") + 1, 0, "x:"),
+		(col(3, ".y") + 1, 0, "y:"),
+		(col(3, "].q") + 2, 0, "q:"),
+		(col(3, "first.p") + 6, 0, "p:"),
+		(col(3, "second.q") + 7, 0, "q:"),
+		(col(3, "h.m") + 2, 2, "m:"),
+		// The string in `lib["a"]` itself goes to the field it names.
+		(col(3, "\"a\"") + 1, 0, "a:"),
+	];
+	for (cursor, line, needle) in cases {
+		let got = def(&mut c, cursor);
+		assert_eq!(
+			got["range"]["start"],
+			at(line as u64, col(line, needle)),
+			"for {needle}"
+		);
+	}
+	// Elements after a `...rest` can't be told apart statically, and `rest` is not an object.
+	assert!(def(&mut c, col(3, "rest.zzz") + 6).is_null());
+	c.finish();
+}

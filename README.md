@@ -18,8 +18,9 @@ Early work in progress. It talks LSP over stdio: `cargo run`.
   client that supports watched-file registration)
 - Go to definition of `x.field` and completion after `.`, following object literals, `+`,
   parentheses, `local` names, `import`s, `self`/`super`/`$` and chained fields across files
-  (static, best effort: no calls, conditionals or `std`), including through object destructuring
-  such as `local {foo, nested: {deep}} = lib;`
+  (static, best effort: no calls, conditionals or `std`), including through destructuring
+  such as `local {foo, nested: {deep}} = lib;` or `local [first, second] = lib.list;`, and through
+  `x["name"]`, `x?.["name"]` and `x[0]` with literal indexes
 - Hover: a local's binding, a field's declaration (also across files), `std` members with their parameters,
   and where an import path resolves to
 - Signature help for calls to `local` functions, to methods or function-valued fields found
@@ -40,7 +41,6 @@ warning, since the real run may use different `-J` paths.
 ## Planned
 
 - Prose documentation for `std` functions (only names and parameters are known today)
-- Field lookup through array destructuring and `?.[...]` indexing
 - Windows paths
 
 ## Building

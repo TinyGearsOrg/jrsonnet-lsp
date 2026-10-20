@@ -250,11 +250,18 @@ pub fn references(root: &SyntaxNode, target: &Decl) -> Vec<TextRange> {
 		.collect()
 }
 
-/// Where a `local` name's value comes from: the bound expression, and the object fields to
-/// follow from it. `local x = e` gives `(e, [])`, and with object destructuring
-/// `local {a: {b: x}} = e` gives `(e, ["a", "b"])`. Function binds, parameters, comprehension
-/// variables and names inside array patterns or `...rest` have no such source.
-pub fn decl_source(root: &SyntaxNode, decl: &Decl) -> Option<(SyntaxNode, Vec<String>)> {
+/// One lookup from a value to a part of it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Step {
+	Field(String),
+	Index(usize),
+}
+
+/// Where a `local` name's value comes from: the bound expression, and the lookups to follow from
+/// it. `local x = e` gives `(e, [])`, and with destructuring `local {a: [_, x]} = e` gives
+/// `(e, [Field("a"), Index(1)])`. Function binds, parameters, comprehension variables, `...rest`
+/// and array elements after a `...rest` have no such source.
+pub fn decl_source(root: &SyntaxNode, decl: &Decl) -> Option<(SyntaxNode, Vec<Step>)> {
 	use jrsonnet_rowan_parser::nodes::DestructObjectField;
 
 	let tok = root
@@ -267,7 +274,7 @@ pub fn decl_source(root: &SyntaxNode, decl: &Decl) -> Option<(SyntaxNode, Vec<St
 		p if p.kind() == SyntaxKind::DESTRUCT_FULL => p,
 		// `{x}` binds `x` to field `x`.
 		p if p.kind() == SyntaxKind::DESTRUCT_OBJECT_FIELD => {
-			path.push(tok.text().to_owned());
+			path.push(Step::Field(tok.text().to_owned()));
 			p
 		}
 		_ => return None,
@@ -281,7 +288,18 @@ pub fn decl_source(root: &SyntaxNode, decl: &Decl) -> Option<(SyntaxNode, Vec<St
 				let field = DestructObjectField::cast(parent.clone())?
 					.field()?
 					.ident_lit()?;
-				path.push(field.text().to_owned());
+				path.push(Step::Field(field.text().to_owned()));
+			}
+			// `[a, <cur>, ...]`: the position among the elements before it.
+			SyntaxKind::DESTRUCT_ARRAY => {
+				let mut index = 0;
+				for sibling in parent.children().take_while(|s| s != &cur) {
+					if sibling.kind() == SyntaxKind::DESTRUCT_REST {
+						return None;
+					}
+					index += 1;
+				}
+				path.push(Step::Index(index));
 			}
 			SyntaxKind::BIND_DESTRUCT => {
 				let bind = BindDestruct::cast(parent)?;

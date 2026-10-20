@@ -1,10 +1,11 @@
 //! Best-effort static lookup of an object expression's fields, for go-to-definition and
 //! completion after `.`.
 //!
-//! This follows only what can be known without evaluating: object literals, `+` and object
-//! extension, parentheses, `local` names bound to such expressions, `import`s and chained
-//! `.field` access, plus `self`, `super` and `$` inside object literals. Anything else (calls,
-//! conditionals, comprehensions, `std`) gives `None` rather than a guess.
+//! This follows only what can be known without evaluating: object and array literals, `+` and
+//! object extension, parentheses, `local` names bound to such expressions (also through object
+//! and array destructuring), `import`s, chained `.field` / `["field"]` / `[0]` access, plus
+//! `self`, `super` and `$` inside object literals. Anything else (calls, conditionals,
+//! comprehensions, `std`) gives `None` rather than a guess.
 
 use std::rc::Rc;
 
@@ -21,7 +22,7 @@ use jrsonnet_rowan_parser::{
 use crate::{
 	document::Document,
 	imports,
-	scope::{self, Resolution},
+	scope::{self, Resolution, Step},
 };
 
 /// Locates other files. The server implements this over open buffers and the disk.
@@ -41,6 +42,19 @@ pub struct Field {
 
 pub type Fields = Vec<Field>;
 
+/// An element of an array literal.
+#[derive(Clone)]
+pub struct Elem {
+	pub doc: Rc<Document>,
+	pub expr: SyntaxNode,
+}
+
+/// What an expression statically is: an object with known fields, or an array literal.
+enum Shape {
+	Object(Fields),
+	Array(Vec<Elem>),
+}
+
 /// Bounds the work on recursive definitions such as `local a = b, b = a`.
 const MAX_DEPTH: u8 = 16;
 
@@ -53,6 +67,19 @@ pub fn eval(
 	stop: Option<&SyntaxNode>,
 	depth: u8,
 ) -> Option<Fields> {
+	match eval_shape(files, doc, expr, stop, depth)? {
+		Shape::Object(fields) => Some(fields),
+		Shape::Array(_) => None,
+	}
+}
+
+fn eval_shape(
+	files: &dyn Files,
+	doc: &Rc<Document>,
+	expr: &SyntaxNode,
+	stop: Option<&SyntaxNode>,
+	depth: u8,
+) -> Option<Shape> {
 	if depth > MAX_DEPTH {
 		return None;
 	}
@@ -60,21 +87,61 @@ pub fn eval(
 		.children()
 		.filter(|c| !matches!(c.kind(), SyntaxKind::STMT_LOCAL | SyntaxKind::STMT_ASSERT));
 	let base = parts.next()?;
-	let mut fields = base_fields(files, doc, &base, depth)?;
+	let mut shape = base_shape(files, doc, &base, depth)?;
 	for suffix in parts {
 		if Some(&suffix) == stop {
 			break;
 		}
-		let name = SuffixIndex::cast(suffix)?.index()?.ident_lit()?;
-		fields = field_fields(files, fields, name.text(), depth)?;
+		shape = step(files, shape, &suffix_step(&suffix)?, depth)?;
 	}
-	Some(fields)
+	Some(shape)
 }
 
-/// The fields of the object that `fields`' field `name` is.
-fn field_fields(files: &dyn Files, fields: Fields, name: &str, depth: u8) -> Option<Fields> {
-	let field = fields.into_iter().find(|f| f.name == name)?;
-	eval(files, &field.doc, field.value.as_ref()?, None, depth + 1)
+/// What a `.name`, `["name"]` or `[0]` suffix (also with `?.`) looks up.
+fn suffix_step(suffix: &SyntaxNode) -> Option<Step> {
+	match suffix.kind() {
+		SyntaxKind::SUFFIX_INDEX => {
+			let name = SuffixIndex::cast(suffix.clone())?.index()?.ident_lit()?;
+			Some(Step::Field(name.text().to_owned()))
+		}
+		SyntaxKind::SUFFIX_INDEX_EXPR => {
+			let index = suffix.children().find(|c| c.kind() == SyntaxKind::EXPR)?;
+			literal_step(&index)
+		}
+		_ => None,
+	}
+}
+
+/// `"name"` or `3` on its own as an index expression.
+fn literal_step(expr: &SyntaxNode) -> Option<Step> {
+	let mut parts = expr
+		.children()
+		.filter(|c| !matches!(c.kind(), SyntaxKind::STMT_LOCAL | SyntaxKind::STMT_ASSERT));
+	let (base, None) = (parts.next()?, parts.next()) else {
+		return None;
+	};
+	let tok = base.first_token()?;
+	match base.kind() {
+		SyntaxKind::EXPR_STRING => imports::string_value(tok.kind(), tok.text()).map(Step::Field),
+		SyntaxKind::EXPR_NUMBER => tok.text().parse().ok().map(Step::Index),
+		_ => None,
+	}
+}
+
+/// Applies one lookup to a shape.
+fn step(files: &dyn Files, shape: Shape, step: &Step, depth: u8) -> Option<Shape> {
+	let (doc, value) = match (shape, step) {
+		(Shape::Object(fields), Step::Field(name)) => {
+			let field = fields.into_iter().find(|f| &f.name == name)?;
+			(field.doc, field.value?)
+		}
+		(Shape::Array(elems), Step::Index(i)) => {
+			let elem = elems.into_iter().nth(*i)?;
+			(elem.doc, elem.expr)
+		}
+		_ => return None,
+	};
+	eval_shape(files, &doc, &value, None, depth + 1)
 }
 
 /// Fields visible after the `.` of `suffix`.
@@ -82,34 +149,55 @@ pub fn before_suffix(files: &dyn Files, doc: &Rc<Document>, suffix: &SyntaxNode)
 	eval(files, doc, &suffix.parent()?, Some(suffix), 0)
 }
 
-fn base_fields(
+fn base_shape(
 	files: &dyn Files,
 	doc: &Rc<Document>,
 	node: &SyntaxNode,
 	depth: u8,
-) -> Option<Fields> {
-	let sub = |e: Option<Expr>| eval(files, doc, e?.syntax(), None, depth + 1);
+) -> Option<Shape> {
+	let sub = |e: Option<Expr>| eval_shape(files, doc, e?.syntax(), None, depth + 1);
+	let object = |fields| Some(Shape::Object(fields));
 	match node.kind() {
-		SyntaxKind::EXPR_OBJECT => object_fields(doc, &ExprObject::cast(node.clone())?),
+		SyntaxKind::EXPR_OBJECT => object(object_fields(doc, &ExprObject::cast(node.clone())?)?),
+		SyntaxKind::EXPR_ARRAY => Some(Shape::Array(
+			node.children()
+				.filter(|c| c.kind() == SyntaxKind::EXPR)
+				.map(|expr| Elem {
+					doc: doc.clone(),
+					expr,
+				})
+				.collect(),
+		)),
 		SyntaxKind::EXPR_PARENED => sub(ExprParened::cast(node.clone())?.expr()),
 		SyntaxKind::EXPR_LITERAL => {
 			let kw = node.first_token()?.kind();
-			keyword_fields(files, doc, node, kw, depth)
+			object(keyword_fields(files, doc, node, kw, depth)?)
 		}
 		SyntaxKind::EXPR_OBJ_EXTEND => {
 			let ext = ExprObjExtend::cast(node.clone())?;
-			Some(merge(sub(ext.lhs())?, sub(ext.rhs())?))
+			let (Shape::Object(lhs), Shape::Object(rhs)) = (sub(ext.lhs())?, sub(ext.rhs())?)
+			else {
+				return None;
+			};
+			object(merge(lhs, rhs))
 		}
 		SyntaxKind::EXPR_BINARY => {
 			let bin = ExprBinary::cast(node.clone())?;
-			// The operator is a bare token child; only `+` combines objects.
+			// The operator is a bare token child; only `+` combines objects and arrays.
 			let is_plus = node
 				.children_with_tokens()
 				.any(|e| e.kind() == SyntaxKind::PLUS);
 			if !is_plus {
 				return None;
 			}
-			Some(merge(sub(bin.lhs())?, sub(bin.rhs())?))
+			match (sub(bin.lhs())?, sub(bin.rhs())?) {
+				(Shape::Object(lhs), Shape::Object(rhs)) => object(merge(lhs, rhs)),
+				(Shape::Array(mut lhs), Shape::Array(rhs)) => {
+					lhs.extend(rhs);
+					Some(Shape::Array(lhs))
+				}
+				_ => None,
+			}
 		}
 		SyntaxKind::EXPR_IMPORT => {
 			let import = ExprImport::cast(node.clone())?;
@@ -123,7 +211,7 @@ fn base_fields(
 				.root
 				.children()
 				.find(|c| c.kind() == SyntaxKind::EXPR)?;
-			eval(files, &target, &root, None, depth + 1)
+			eval_shape(files, &target, &root, None, depth + 1)
 		}
 		SyntaxKind::EXPR_VAR => {
 			let var = ExprVar::cast(node.clone())?;
@@ -131,11 +219,11 @@ fn base_fields(
 				return None;
 			};
 			let (value, path) = scope::decl_source(&doc.root, &decl)?;
-			let mut fields = eval(files, doc, &value, None, depth + 1)?;
-			for name in &path {
-				fields = field_fields(files, fields, name, depth)?;
+			let mut shape = eval_shape(files, doc, &value, None, depth + 1)?;
+			for s in &path {
+				shape = step(files, shape, s, depth)?;
 			}
-			Some(fields)
+			Some(shape)
 		}
 		_ => None,
 	}
