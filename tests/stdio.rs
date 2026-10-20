@@ -518,3 +518,51 @@ fn import_diagnostics_refresh_on_file_changes() {
 
 	c.finish();
 }
+
+#[test]
+fn fields_through_destructuring() {
+	let mut c = Client::start();
+	c.initialize();
+	let uri = "file:///destructure.jsonnet";
+	let line0 = "local {foo, nested: {deep}, alias: al} = { foo: { bar: 1 }, nested: { deep: { baz: 2 } }, alias: { qux: 3 } };";
+	let line1 = "[foo.bar, deep.baz, al.qux, foo.]";
+	c.open(uri, &format!("{line0}\n{line1}"));
+	let col = |line: &str, needle: &str| line.find(needle).unwrap() as u64;
+
+	let mut id = 0;
+	let mut def = |c: &mut Client, character: u64| {
+		id += 1;
+		let r = c.request(
+			id,
+			"textDocument/definition",
+			json!({
+			"textDocument":{"uri":uri},"position":{"line":1,"character":character}}),
+		);
+		r["result"]["range"]["start"].clone()
+	};
+	// Each lookup lands on the field declared inside the object literal on line 0.
+	for (use_, decl) in [(".bar", "bar:"), (".baz", "baz:"), (".qux", "qux:")] {
+		let got = def(&mut c, col(line1, use_) + 2);
+		assert_eq!(
+			got,
+			json!({"line":0,"character":col(line0, decl)}),
+			"for {use_}"
+		);
+	}
+
+	// Completion sees through the pattern as well.
+	let items = c.request(
+		99,
+		"textDocument/completion",
+		json!({
+		"textDocument":{"uri":uri},"position":{"line":1,"character":col(line1, "foo.]") + 4}}),
+	);
+	let labels: Vec<_> = items["result"]
+		.as_array()
+		.unwrap()
+		.iter()
+		.map(|i| i["label"].as_str().unwrap())
+		.collect();
+	assert_eq!(labels, ["bar"]);
+	c.finish();
+}

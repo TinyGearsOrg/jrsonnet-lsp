@@ -17,7 +17,8 @@ Early work in progress. It talks LSP over stdio: `cargo run`.
   client that supports watched-file registration)
 - Go to definition of `x.field` and completion after `.`, following object literals, `+`,
   parentheses, `local` names, `import`s, `self`/`super`/`$` and chained fields across files
-  (static, best effort: no calls, conditionals or `std`)
+  (static, best effort: no calls, conditionals or `std`), including through object destructuring
+  such as `local {foo, nested: {deep}} = lib;`
 - Hover: a local's binding, a field's declaration (also across files), `std` members by name,
   and where an import path resolves to
 - `std.` completion (names taken from jrsonnet's own `std` at the pinned rev), completion of
@@ -34,7 +35,7 @@ warning, since the real run may use different `-J` paths.
 ## Planned
 
 - Signature help, and std documentation in hover
-- jrsonnet-specific syntax and builtins beyond what the parser already accepts
+- Field lookup through array destructuring and `?.[...]` indexing
 - Windows paths
 - Incremental text sync, and hint-level diagnostics once `SyntaxError` is exported upstream
 
@@ -45,3 +46,11 @@ warning, since the real run may use different `-J` paths.
 since the parser's tree doesn't always match `jsonnet.ungram`.
 
 jrsonnet is pinned by git rev in `Cargo.toml` because its API is still moving.
+
+## jrsonnet extensions
+
+The CST parser accepts jrsonnet's extensions unconditionally, and the server understands them:
+destructuring in `local` and parameters (`{a, b: [c, ...rest]}`, `?` skips, defaults),
+`for [k, v] in obj` comprehensions, and `??` / `?.`. Names, references and rename work in all of
+them, and fields can be followed through object patterns. `std` completion lists whatever
+jrsonnet's own `std` provides, including its additions to the standard library.

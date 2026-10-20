@@ -66,10 +66,15 @@ pub fn eval(
 			break;
 		}
 		let name = SuffixIndex::cast(suffix)?.index()?.ident_lit()?;
-		let field = fields.into_iter().find(|f| f.name == name.text())?;
-		fields = eval(files, &field.doc, field.value.as_ref()?, None, depth + 1)?;
+		fields = field_fields(files, fields, name.text(), depth)?;
 	}
 	Some(fields)
+}
+
+/// The fields of the object that `fields`' field `name` is.
+fn field_fields(files: &dyn Files, fields: Fields, name: &str, depth: u8) -> Option<Fields> {
+	let field = fields.into_iter().find(|f| f.name == name)?;
+	eval(files, &field.doc, field.value.as_ref()?, None, depth + 1)
 }
 
 /// Fields visible after the `.` of `suffix`.
@@ -125,8 +130,12 @@ fn base_fields(
 			let Resolution::Local(decl) = scope::resolve(&var)? else {
 				return None;
 			};
-			let value = scope::decl_value(&doc.root, &decl)?;
-			eval(files, doc, &value, None, depth + 1)
+			let (value, path) = scope::decl_source(&doc.root, &decl)?;
+			let mut fields = eval(files, doc, &value, None, depth + 1)?;
+			for name in &path {
+				fields = field_fields(files, fields, name, depth)?;
+			}
+			Some(fields)
 		}
 		_ => None,
 	}

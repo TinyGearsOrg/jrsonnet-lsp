@@ -250,21 +250,51 @@ pub fn references(root: &SyntaxNode, target: &Decl) -> Vec<TextRange> {
 		.collect()
 }
 
-/// The expression a plain `local x = <expr>` name is bound to. Function binds, parameters,
-/// comprehension variables and names inside a destructuring pattern have no single value.
-pub fn decl_value(root: &SyntaxNode, decl: &Decl) -> Option<SyntaxNode> {
+/// Where a `local` name's value comes from: the bound expression, and the object fields to
+/// follow from it. `local x = e` gives `(e, [])`, and with object destructuring
+/// `local {a: {b: x}} = e` gives `(e, ["a", "b"])`. Function binds, parameters, comprehension
+/// variables and names inside array patterns or `...rest` have no such source.
+pub fn decl_source(root: &SyntaxNode, decl: &Decl) -> Option<(SyntaxNode, Vec<String>)> {
+	use jrsonnet_rowan_parser::nodes::DestructObjectField;
+
 	let tok = root
 		.token_at_offset(decl.range.start())
 		.find(|t| t.text_range() == decl.range)?;
-	let full = tok.parent()?.parent()?;
-	if full.kind() != SyntaxKind::DESTRUCT_FULL {
-		return None;
+	let name = tok.parent()?;
+	let mut path = vec![];
+	// `cur` is the pattern part that binds the name, or the field node it is shorthand for.
+	let mut cur = match name.parent()? {
+		p if p.kind() == SyntaxKind::DESTRUCT_FULL => p,
+		// `{x}` binds `x` to field `x`.
+		p if p.kind() == SyntaxKind::DESTRUCT_OBJECT_FIELD => {
+			path.push(tok.text().to_owned());
+			p
+		}
+		_ => return None,
+	};
+	loop {
+		let parent = cur.parent()?;
+		match parent.kind() {
+			SyntaxKind::DESTRUCT_OBJECT => {}
+			// `field: <cur>`
+			SyntaxKind::DESTRUCT_OBJECT_FIELD => {
+				let field = DestructObjectField::cast(parent.clone())?
+					.field()?
+					.ident_lit()?;
+				path.push(field.text().to_owned());
+			}
+			SyntaxKind::BIND_DESTRUCT => {
+				let bind = BindDestruct::cast(parent)?;
+				if BindDestruct::into(&bind)?.syntax() != &cur {
+					return None;
+				}
+				path.reverse();
+				return Some((bind.value()?.syntax().clone(), path));
+			}
+			_ => return None,
+		}
+		cur = parent;
 	}
-	let bind = BindDestruct::cast(full.parent()?)?;
-	if BindDestruct::into(&bind)?.syntax() != &full {
-		return None;
-	}
-	Some(bind.value()?.syntax().clone())
 }
 
 /// Names usable at `offset`, innermost declarations first, each name once.
@@ -399,6 +429,19 @@ mod tests {
 		check("{ [‹k›]: 1 for «k» in [1] }");
 	}
 
+	/// Syntax from jrsonnet's `exp-destruct`, `exp-object-iteration` and null-coalescing features.
+	#[test]
+	fn jrsonnet_extensions() {
+		check("local {a, b: [c, ...d], ...«r»} = x; ‹r›");
+		check("local {a, b: [c, ...«d»]} = x; ‹d›");
+		check("local [?, «b»] = x; ‹b›");
+		check("local {«a», b = ‹a›} = {}; b");
+		check("function({«a»} = {}) ‹a›");
+		check("function([«x», y]) ‹x›");
+		check("{ [‹k›]: 1 for [«k», v] in {} }");
+		check("{ [k]: ‹v› for [k]: «v» in {} }");
+		check("local «a» = {}; ‹a›?.b ?? 1");
+	}
 	#[test]
 	fn unresolved_names() {
 		assert_eq!(unresolved("local a = 1; b"), ["b"]);
