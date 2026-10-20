@@ -3,10 +3,14 @@ name: Release
 # Push a tag like v0.1.0 (matching the version in extension/package.json) to build the
 # platform-specific VSIXes and attach them to a GitHub release. They are also published to the
 # Marketplace when the VSCE_PAT secret is set (the token must belong to the TinyGears publisher).
+#
+# Running the workflow by hand (Actions, Run workflow) builds and packages everything without
+# releasing or publishing, which is how to check a change to this file.
 
 on:
   push:
     tags: ['v*']
+  workflow_dispatch:
 
 env:
   CARGO_TERM_COLOR: always
@@ -18,37 +22,42 @@ jobs:
       fail-fast: false
       matrix:
         # `vsce` lists the VS Code targets built from one binary (`vsce package --target`),
-        # `platform` is the VS Code target of the build machine and `rust` the Rust target.
+        # `platform` is the target of that binary and `rust` its Rust target. `smoke` says whether
+        # the binary can run on the build machine, so that it is started and checked there.
         #
         # Linux is a static musl binary: it runs on any distribution regardless of glibc, and is
         # also the right binary for Alpine.
         include:
-          - { vsce: 'linux-x64,alpine-x64', platform: linux-x64, os: ubuntu-latest, rust: x86_64-unknown-linux-musl }
-          # The other platforms are one entry each. They compile (checked for every Rust target
-          # below) and the tests run on macOS and Windows in ci.yml, but nothing has been
-          # packaged or run for them yet. Enable an entry once CI is green for its platform:
-          #   - { vsce: darwin-arm64, platform: darwin-arm64, os: macos-latest, rust: aarch64-apple-darwin }
-          #   - { vsce: darwin-x64, platform: darwin-x64, os: macos-latest, rust: x86_64-apple-darwin }
-          #   - { vsce: win32-x64, platform: win32-x64, os: windows-latest, rust: x86_64-pc-windows-msvc }
-          #   - { vsce: win32-arm64, platform: win32-arm64, os: windows-latest, rust: aarch64-pc-windows-msvc }
-          # Linux on ARM needs a native runner (ubuntu-24.04-arm, free for public repositories) or
-          # a cross linker, such as `cargo zigbuild`:
-          #   - { vsce: 'linux-arm64,alpine-arm64', platform: linux-arm64, os: ubuntu-24.04-arm, rust: aarch64-unknown-linux-musl }
+          - { vsce: 'linux-x64,alpine-x64', platform: linux-x64, os: ubuntu-latest, rust: x86_64-unknown-linux-musl, smoke: true }
+          - { vsce: 'linux-arm64,alpine-arm64', platform: linux-arm64, os: ubuntu-24.04-arm, rust: aarch64-unknown-linux-musl, smoke: true }
+          - { vsce: darwin-arm64, platform: darwin-arm64, os: macos-latest, rust: aarch64-apple-darwin, smoke: true }
+          - { vsce: darwin-x64, platform: darwin-x64, os: macos-latest, rust: x86_64-apple-darwin, smoke: false }
+          - { vsce: win32-x64, platform: win32-x64, os: windows-latest, rust: x86_64-pc-windows-msvc, smoke: true }
+          - { vsce: win32-arm64, platform: win32-arm64, os: windows-latest, rust: aarch64-pc-windows-msvc, smoke: false }
     runs-on: ${{ matrix.os }}
     defaults:
       run:
         shell: bash
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7.0.0
         with:
           node-version: 22
       - name: The tag matches the extension's version
+        if: startsWith(github.ref, 'refs/tags/')
         run: test "v$(node -p "require('./extension/package.json').version")" = "$GITHUB_REF_NAME"
       - run: rustup toolchain install stable --profile minimal --target ${{ matrix.rust }}
       - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.rust }}
       - run: ./scripts/setup-jrsonnet.sh
       - run: cargo build --release --target ${{ matrix.rust }}
+      - name: The binary starts and speaks LSP
+        if: ${{ matrix.smoke }}
+        run: |
+          exe=jsonnet-lsp
+          case "${{ matrix.platform }}" in win32-*) exe=jsonnet-lsp.exe ;; esac
+          node extension/scripts/smoke-server.mjs target/${{ matrix.rust }}/release/$exe
       - name: Bundle the server and package the extension
         working-directory: extension
         run: |
@@ -57,24 +66,25 @@ jobs:
           case "${{ matrix.platform }}" in win32-*) exe=jsonnet-lsp.exe ;; esac
           node scripts/bundle-server.mjs --platform ${{ matrix.platform }} --binary ../target/${{ matrix.rust }}/release/$exe
           node scripts/package.mjs --target ${{ matrix.vsce }}
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7.0.1
         with:
           name: vsix-${{ matrix.platform }}
           path: extension/*.vsix
 
   publish:
     needs: build
+    if: startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-latest
     permissions:
       contents: write
     env:
       VSCE_PAT: ${{ secrets.VSCE_PAT }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7.0.0
         with:
           node-version: 22
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8.0.1
         with:
           pattern: vsix-*
           path: dist
